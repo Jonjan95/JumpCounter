@@ -2233,7 +2233,9 @@ end
 do
     local CROWN_MIN = 25              -- jumps this hour needed to hold the crown
     local CROWN_XP = 50
-    local CROWN_NEWS_GAP = 180        -- at most one "took the crown" line per 3 minutes
+    local CROWN_NEWS_GAP = 300        -- at most one "took the crown" line per 5 minutes
+    local CROWN_QUIET = 1200          -- no "took the crown" lines in an hour's first 20 minutes
+                                      -- (everyone starts at 0 and the lead flips constantly)
     local holderHour, holderKey, holderClass, holderCount
     local started = false
     local lastNews = -CROWN_NEWS_GAP
@@ -2260,6 +2262,7 @@ do
 
     local function CrownNews(key, prev, class, count)
         if not settings.crownNews or GetTime() - lastNews < CROWN_NEWS_GAP then return end
+        if GetServerTime() % 3600 < CROWN_QUIET then return end
         lastNews = GetTime()
         local name = ColoredName(key, class)
         if key == playerKey then
@@ -2958,7 +2961,7 @@ local function BuildSettingsTab(page, width)
         "A chat line with the result when two other players finish a jump duel.")
     SettingCheck("crownNews", "The crown",
         "Whoever jumps most in an hour holds the crown. A chat line when someone takes it "
-        .. "(at most every 3 minutes) and when the hour's winner is decided.")
+        .. "(not in the first 20 minutes of the hour, at most every 5 minutes) and when the hour's winner is decided.")
     SettingCheck("sounds", "Play sounds", "Play a sound with milestone and overtake messages.")
 
     local help = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")

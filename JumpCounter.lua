@@ -661,7 +661,14 @@ end
 -- Friends who have shown they run JumpCounter this session. Regular score
 -- updates only go to these; everyone else is contacted once at login
 -- ("discovery") so we don't keep messaging people without the addon.
-local knownWhisper = {}   -- [character name] = true
+local knownWhisper = {}   -- [WhisperId(character name)] = true
+
+-- Forever's two-part names can be written differently by the friends list
+-- ("Akropil", "Akropil Resotrange") and by whispers ("Akropil Resotrange-Realm"),
+-- so friends are matched on the first name, lowercased.
+local function WhisperId(name)
+    return ((name or ""):match("^[^%s%-]+") or name or ""):lower()
+end
 local knownBNet = {}      -- [gameAccountID] = true
 
 -- Online characters on your WoW friends list who aren't reached via guild/group.
@@ -757,7 +764,7 @@ local function Send(msg, discover, skipGuild)
         if not (skipGuild and channel == "GUILD") then Enqueue(msg, channel) end
     end
     for _, name in ipairs(GetOnlineFriends()) do
-        if discover or knownWhisper[name] or knownWhisper[name:match("^[^-]+")] then
+        if discover or knownWhisper[WhisperId(name)] then
             SendWhisper(name, msg)
         end
     end
@@ -1272,8 +1279,7 @@ local function OnAddonMessage(prefix, msg, channel, sender)
     local key, display = NormalizeSender(sender)
     local reply
     if channel == "WHISPER" then
-        knownWhisper[sender] = true
-        knownWhisper[sender:match("^[^-]+")] = true
+        knownWhisper[WhisperId(sender)] = true
         reply = function(m) SendWhisper(sender, m) end
     end
     local via = (channel == "GUILD" and "GUILD") or (channel == "WHISPER" and "WHISPER") or "GROUP"

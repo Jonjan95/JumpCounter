@@ -2383,7 +2383,9 @@ do
         local result = (me > them and 1) or (me < them and 0) or 0.5
         local change = DUEL_POINTS.Change(myPoints, theirPoints, result)
         local note = ""
-        if change < 0 and myPoints < DUEL_POINTS.protected then
+        if change < 0 and d.died then
+            change, note = 0, " |cff999999(you died during the duel - no duel points lost)|r"
+        elseif change < 0 and myPoints < DUEL_POINTS.protected then
             change, note = 0, " |cff999999(no points lost below " .. DuelRank(DUEL_POINTS.protected) .. ")|r"
         elseif result == 0 and (acct.lossStreak or 0) >= DUEL_POINTS.shieldAfter then
             change, note = 0, " |cff999999(shield: no points lost after 3 losses in a row)|r"
@@ -2399,7 +2401,13 @@ do
         elseif result == 0 then
             acct.duelLosses = (acct.duelLosses or 0) + 1
             -- The shield resets the streak, so it comes again after 3 more.
-            acct.lossStreak = (change == 0 and note:find("shield")) and 0 or (acct.lossStreak or 0) + 1
+            if d.died then
+                -- A death isn't a real loss: the streak stays as it was.
+            elseif change == 0 and note:find("shield") then
+                acct.lossStreak = 0
+            else
+                acct.lossStreak = (acct.lossStreak or 0) + 1
+            end
             text = ("%s won the jump duel, %d - %d. (+%d XP for playing, %s)"):format(opp, them, me, xp, pts)
             short = "Good fight!"
         else
@@ -2598,6 +2606,16 @@ do
     end
 
     -- Called for every counted jump.
+    -- 1.8.4: dying during the countdown or the duel costs no duel points
+    -- (the other player still wins as usual).
+    function DUEL_POINTS.OnDeath()
+        local now = GetServerTime()
+        if duel and (duel.state == "on" or duel.state == "accepted" or duel.state == "invited")
+            and now < duel.finish then
+            duel.died = true
+        end
+    end
+
     function DuelOnJump()
         if duel and duel.state == "on" then
             local now = GetServerTime()
@@ -4120,6 +4138,7 @@ local function OnPlayerDead()
     charData.deaths = (charData.deaths or 0) + 1
     acct.stats.sinceDeath = 0           -- "without dying" challenges start over
     Daily.OnDeath()
+    DUEL_POINTS.OnDeath()
     dirty = true
     UpdateCounter()
     RefreshBoardSoon()

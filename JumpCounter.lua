@@ -21,6 +21,7 @@ local sessionJumps = 0
 local lastJumpTime = 0
 local dirty = false               -- total changed since last broadcast
 local lastReplyTime = 0
+local heardThisSession = {}       -- [account id or key] = true once we've had their score
 
 local counterFrame, boardFrame
 local ScoreMessage                -- defined in the networking section
@@ -1187,7 +1188,20 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.via, entry.hops = via, 0            -- heard directly
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
+        -- Their total went up since their last score: they're jumping right
+        -- now (duels only pick players who are). A reply to a login doesn't count.
+        if oldTotal and total > oldTotal then entry.lastJumped = time() end
         JumpCounterDB.peers[key] = entry
+        -- A guild member we haven't heard from this session (they just logged
+        -- in or installed): answer once with our score, so they see us - and
+        -- our jumps this hour - even if we're standing still. The login
+        -- request skips the guild to keep big guilds quiet; this covers it.
+        local who = acctId or key
+        if via == "GUILD" and not heardThisSession[who] and GetTime() - lastReplyTime > 10 then
+            lastReplyTime = GetTime()
+            C_Timer.After(1 + math.random() * 9, function() BroadcastScore() end)
+        end
+        heardThisSession[who] = true
         PruneStalePeers()
         if JumpCounterDB.peers[key] ~= entry then return end   -- itself a leftover copy
         OnPeerScore(key, oldTotal, total, entry.class, oldPrestige, entry.prestige)
@@ -1855,7 +1869,7 @@ do
         for key, data in pairs(JumpCounterDB.peers) do
             if data.acct and data.version and not IsNewerVersion(DUEL_MIN_VERSION, data.version)
                 and (data.hops or 0) == 0          -- heard directly, so we can reach them
-                and time() - (data.seen or 0) <= DUEL_ACTIVE and (busyUntil[data.acct] or 0) < now then
+                and time() - (data.lastJumped or 0) <= DUEL_ACTIVE and (busyUntil[data.acct] or 0) < now then
                 table.insert(list, { acct = data.acct, name = DisplayName(key), class = data.class })
             end
         end
@@ -2161,9 +2175,9 @@ do
         if key == playerKey then
             Notify(GOLD:format(("You took the crown! Most jumps this hour: %d."):format(count)))
         elseif prev == playerKey then
-            Print(("%s %s took your crown! (%d jumps this hour)"):format(CROWN_ICON, name, count))
+            Print(("%s%s took your crown! (%d jumps this hour)"):format(CROWN_ICON, name, count))
         else
-            Print(("%s %s took the crown with %d jumps this hour."):format(CROWN_ICON, name, count))
+            Print(("%s%s took the crown with %d jumps this hour."):format(CROWN_ICON, name, count))
         end
     end
 
@@ -2180,7 +2194,7 @@ do
                     :format(holderCount, CROWN_XP)), true)
                 CheckChallenges()
             elseif holderKey and settings.crownNews then
-                Print(("%s %s won the crown with %d jumps this hour!"):format(CROWN_ICON,
+                Print(("%s%s won the crown with %d jumps this hour!"):format(CROWN_ICON,
                     ColoredName(holderKey, holderClass), holderCount))
             end
             holderKey = nil

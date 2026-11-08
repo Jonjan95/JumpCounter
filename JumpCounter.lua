@@ -1783,9 +1783,20 @@ do
         Send(table.concat(parts, ":"))
     end
 
+    -- True when we can't jump right now: on a flight path, in a vehicle or dead.
+    local function CantJump()
+        local function on(f)
+            if not f then return false end
+            local v = f("player")
+            if issecretvalue and issecretvalue(v) then return false end
+            return v and true or false
+        end
+        return on(UnitOnTaxi) or on(UnitInVehicle) or on(UnitIsDeadOrGhost)
+    end
+
     -- manual = someone typed /jumps duel: skip the cooldown.
     local function CanDuel(now, manual)
-        return settings.duels and not duel and not UnitIsAFK("player")
+        return settings.duels and not duel and not UnitIsAFK("player") and not CantJump()
             and (manual or now - lastDuelEnd >= DUEL_COOLDOWN)
     end
 
@@ -1879,7 +1890,7 @@ do
         if d and d.state ~= "on" and now >= d.start then
             -- The invite was never confirmed.
             if d.manual and d.state == "invited" then
-                Print(("%s didn't accept the duel (busy, AFK or duels turned off)."):format(
+                Print(("%s didn't accept the duel (busy, AFK, on a flight path or duels turned off)."):format(
                     ClassColored(d.opp.name, d.opp.class)))
             end
             duel = nil

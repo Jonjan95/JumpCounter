@@ -1231,6 +1231,10 @@ do
             if d.acct == rAcct then key, entry = k, d break end
         end
         if entry and (entry.seen or 0) >= rSeen then return end   -- we know newer
+        -- 1.8.4: heard from them directly in the last 10 minutes? Then that
+        -- line wins. Passed-along copies carry the passer's clock, which can
+        -- run ahead and made direct friends look like "via friends".
+        if entry and entry.directSeen and time() - entry.directSeen < 600 then return end
         if not key then
             key = NormalizeSender(rKey)
             if key == playerKey or JumpCounterDB.chars[key] then return end
@@ -1396,6 +1400,7 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.prestigeSpent = tonumber(prestigeSpent)   -- these two are nil before 1.8.2
         entry.duelPoints = tonumber(duelPoints)
         entry.via, entry.hops = via, 0            -- heard directly
+        entry.directSeen = time()
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
         -- Their total went up since their last score: they're jumping right

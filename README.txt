@@ -31,7 +31,8 @@ OPEN IT
                an XP bar. A "Prestige!" button appears here at level 30.
     Stat row   total jumps, this week, jumps per hour, deaths, challenges
                and your position on the leaderboard.
-    Tabs       Leaderboard - All time / This week / Per hour / Level / Deaths.
+    Tabs       Leaderboard - All time / This hour / This week / Per hour /
+                             Level / Deaths.
                              Hover a player for all their details. Your own
                              row is always shown at the bottom.
                Challenges  - progress on every challenge, closest first.
@@ -75,6 +76,12 @@ JUMP DUELS
   sees the result in chat. At most one random duel every 30 minutes;
   turn them off (or the results of others' duels) in Settings.
   Both players need v1.7.0 or newer.
+
+THE CROWN
+  Whoever jumps the most in the current hour holds the crown (shown next
+  to their name on the leaderboard - see the "This hour" tab). When the
+  hour ends, the holder wins it and gets bonus XP. A fresh race every
+  hour, so anyone can take it. Needs at least 25 jumps that hour.
 
 JUMPS PER HOUR
   Jumps divided by your online time, not counting time flagged AFK. Shown

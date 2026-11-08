@@ -29,6 +29,8 @@ local ToggleChallenges            -- defined in the progression section
 local CheckChallenges             -- defined in the progression section
 local OnDuelMessage               -- defined in the jump duels section
 local ShowUpdateWindow            -- defined after the counter window
+local CrownTick                   -- defined in the crown section
+local crownKey                    -- leaderboard key of whoever holds the crown this hour
 local settings                    -- JumpCounterDB.settings
 
 local DEFAULT_SETTINGS = {
@@ -39,6 +41,7 @@ local DEFAULT_SETTINGS = {
     myDeaths = true,              -- short chat line (only to you) when you die
     duels = true,                 -- take part in random jump duels
     duelNews = true,              -- chat line with the result of other players' duels
+    crownNews = true,             -- chat line when the crown changes hands / is won
     myProgress = true,            -- jump level-ups and completed challenges
     sounds = false,               -- off by default; can be enabled in options
     minimapButton = true,         -- JumpCounter button on the minimap edge
@@ -153,6 +156,17 @@ local function CurrentWeekId()
     local WEEK = 604800
     local nextMonday = (math.floor((now - 345600) / WEEK) + 1) * WEEK + 345600
     return math.floor(nextMonday / 3600)
+end
+
+-- The hour's id (whole hours since 1970, server time): the same everywhere.
+local function CurrentHourId()
+    return math.floor(GetServerTime() / 3600)
+end
+
+-- Jumps this hour for an entry (0 if its count is from an earlier hour).
+local function HourCount(data)
+    if data.hourId == CurrentHourId() then return data.hour or 0 end
+    return 0
 end
 
 local function FormatDuration(secs)
@@ -416,6 +430,14 @@ local CHALLENGES = {
       desc = "Win 10 jump duels.",                            progress = function() return acct.duelWins or 0 end },
     { id = "duel3",    name = "Undisputed",        xp = 4000, goal = 50,
       desc = "Win 50 jump duels.",                            progress = function() return acct.duelWins or 0 end },
+
+    -- 1.8.0: the crown (most jumps in an hour).
+    { id = "crown1",   name = "Crowned",           xp = 300,  goal = 1,
+      desc = "Win the crown: most jumps in an hour.",         progress = function() return acct.crowns or 0 end },
+    { id = "crown2",   name = "Royal Leaper",      xp = 1500, goal = 10,
+      desc = "Win the crown 10 times.",                       progress = function() return acct.crowns or 0 end },
+    { id = "crown3",   name = "Jump Monarch",      xp = 4000, goal = 50,
+      desc = "Win the crown 50 times.",                       progress = function() return acct.crowns or 0 end },
 }
 
 local function CountCompleted(data)
@@ -584,6 +606,8 @@ local FACTION_ICONS = {
     H = "|TInterface\\Icons\\INV_BannerPVP_01:14:14:0:0:64:64:5:59:5:59|t ",
 }
 local function FactionIcon(f) return FACTION_ICONS[f or ""] or "" end
+-- The group leader crown, shown next to whoever jumped most this hour.
+local CROWN_ICON = "|TInterface\\GroupFrame\\UI-Group-LeaderIcon:14:14|t "
 
 -- Your account as one leaderboard entry: every character's jumps, deaths,
 -- week and online time added up, plus the shared level and challenges.
@@ -591,8 +615,10 @@ local function FactionIcon(f) return FACTION_ICONS[f or ""] or "" end
 local function Me()
     local wid = CurrentWeekId()
     local me = { total = 0, week = 0, weekId = wid, deaths = 0, rate = { jumps = 0, seconds = 0 },
-        challengeXP = acct.challengeXP + (acct.duelXP or 0), prestige = acct.prestige, done = acct.done,
+        challengeXP = acct.challengeXP + (acct.duelXP or 0) + (acct.crownXP or 0),
+        prestige = acct.prestige, done = acct.done,
         duelWins = acct.duelWins or 0, faction = MyFaction(),
+        hourId = acct.hourId, hour = acct.hour, crowns = acct.crowns or 0,
         class = charData.class, display = charData.display }
     for _, c in pairs(JumpCounterDB.chars) do
         me.total = me.total + (c.total or 0)
@@ -770,8 +796,10 @@ function ScoreMessage()
     -- 1.5.0: duels won, after the character list (older versions ignore it).
     -- 1.6.0: faction ("A" / "H") after that.
     -- 1.7.3: duels lost and drawn after that.
+    -- 1.8.0: hour id, jumps this hour and crowns won after that.
     local suffix = ":" .. (acct.duelWins or 0) .. ":" .. (MyFaction() or "")
         .. ":" .. (acct.duelLosses or 0) .. ":" .. (acct.duelDraws or 0)
+        .. ":" .. CurrentHourId() .. ":" .. HourCount(me) .. ":" .. (acct.crowns or 0)
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -916,7 +944,8 @@ do
             n(data.charLevel), n(data.xp), n(data.challenges), n(data.jph), n(data.prestige),
             n(data.duelWins), n(data.version), n(data.seen), (data.hops or 0) + 1,
             -- 1.7.3: after the hop count, so older versions ignore them
-            n(data.duelLosses), n(data.duelDraws) }, ":")
+            n(data.duelLosses), n(data.duelDraws),
+            n(data.hourId), n(data.hour), n(data.crowns) }, ":")   -- 1.8.0
     end
 
     -- Up to RELAY_BATCH passable scores (newest first) that pass filter(data).
@@ -979,7 +1008,8 @@ do
 
     function ApplyRelay(msg, via)
         local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
-            rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws = strsplit(":", msg)
+            rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws,
+            rHourId, rHour, rCrowns = strsplit(":", msg)
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
@@ -1012,6 +1042,7 @@ do
         entry.xp, entry.challenges, entry.jph = num(rXP), num(rChallenges), num(rJph)
         entry.prestige, entry.duelWins = num(rPrestige), num(rDuels)
         entry.duelLosses, entry.duelDraws = num(rLosses), num(rDraws)   -- nil before 1.7.3
+        entry.hourId, entry.hour, entry.crowns = num(rHourId), num(rHour), num(rCrowns)   -- 1.8.0
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
         entry.hops = tonumber(rHops) or RELAY_MAX_HOPS
@@ -1076,7 +1107,7 @@ local function HandleMessage(msg, key, display, reply, via)
     end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
         charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction,
-        duelLosses, duelDraws = strsplit(":", msg)
+        duelLosses, duelDraws, hourId, hourCount, crowns = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -1150,6 +1181,9 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.faction = (faction == "A" or faction == "H") and faction or entry.faction   -- 1.6.0
         entry.duelLosses = tonumber(duelLosses)   -- these two are nil before 1.7.3
         entry.duelDraws = tonumber(duelDraws)
+        entry.hourId = tonumber(hourId)           -- these three are nil before 1.8.0
+        entry.hour = tonumber(hourCount)
+        entry.crowns = tonumber(crowns)
         entry.via, entry.hops = via, 0            -- heard directly
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
@@ -1409,6 +1443,9 @@ local function BuildStandings(mode)
         local score = data.total
         if mode == "week" then
             score = (wid and data.weekId == wid) and (data.week or 0) or 0
+            if score == 0 and key ~= playerKey then return end
+        elseif mode == "hour" then
+            score = HourCount(data)
             if score == 0 and key ~= playerKey then return end
         elseif mode == "deaths" then
             if data.deaths == nil and key ~= playerKey and not mine then return end
@@ -2090,6 +2127,84 @@ end
 
 
 ---------------------------------------------------------------------------
+-- The crown: whoever has jumped most this (clock) hour holds it, shown on
+-- the leaderboard. When the hour ends, whoever holds it wins it: bonus XP
+-- and a crown on their record. A fresh race every hour, so newer players
+-- have a real shot. Each player's addon decides from the scores it knows.
+---------------------------------------------------------------------------
+do
+    local CROWN_MIN = 25              -- jumps this hour needed to hold the crown
+    local CROWN_XP = 50
+    local CROWN_NEWS_GAP = 180        -- at most one "took the crown" line per 3 minutes
+    local holderHour, holderKey, holderClass, holderCount
+    local started = false
+    local lastNews = -CROWN_NEWS_GAP
+
+    -- The leader this hour (a tie keeps the crown with whoever had it).
+    local function Leader()
+        local list = BuildStandings("hour")
+        local top = list[1]
+        if not top or top.score < CROWN_MIN then return nil end
+        if holderKey and top.key ~= holderKey then
+            for _, e in ipairs(list) do
+                if e.score < top.score then break end
+                if e.key == holderKey then return e end
+            end
+        end
+        return top
+    end
+
+    local function CrownNews(key, prev, class, count)
+        if not settings.crownNews or GetTime() - lastNews < CROWN_NEWS_GAP then return end
+        lastNews = GetTime()
+        local name = ColoredName(key, class)
+        if key == playerKey then
+            Notify(GOLD:format(("You took the crown! Most jumps this hour: %d."):format(count)))
+        elseif prev == playerKey then
+            Print(("%s %s took your crown! (%d jumps this hour)"):format(CROWN_ICON, name, count))
+        else
+            Print(("%s %s took the crown with %d jumps this hour."):format(CROWN_ICON, name, count))
+        end
+    end
+
+    -- Every few seconds: has the crown changed hands, or has the hour ended?
+    function CrownTick()
+        local hid = CurrentHourId()
+        if holderHour and holderHour ~= hid then
+            -- The hour is over: whoever held the crown wins it.
+            if holderKey == playerKey then
+                acct.crowns = (acct.crowns or 0) + 1
+                acct.crownXP = (acct.crownXP or 0) + CROWN_XP
+                dirty = true
+                Notify(GOLD:format(("You won the crown with %d jumps this hour! (+%d XP)")
+                    :format(holderCount, CROWN_XP)), true)
+                CheckChallenges()
+            elseif holderKey and settings.crownNews then
+                Print(("%s %s won the crown with %d jumps this hour!"):format(CROWN_ICON,
+                    ColoredName(holderKey, holderClass), holderCount))
+            end
+            holderKey = nil
+        end
+        holderHour = hid
+
+        local e = Leader()
+        local key = e and e.key
+        if key ~= holderKey then
+            local prev = holderKey
+            holderKey = key
+            -- No news for whoever already had it when we logged in.
+            if key and started then CrownNews(key, prev, e.class, e.score) end
+        end
+        if e then holderClass, holderCount = e.class, e.score end
+        started = true
+        if crownKey ~= key then
+            crownKey = key
+            RefreshBoardSoon()
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- Jump detection
 ---------------------------------------------------------------------------
 -- Our hook runs *after* the jump starts, so IsFalling() may already be true.
@@ -2162,6 +2277,9 @@ local function OnJump()
         end
         charData.week = charData.week + 1
     end
+    local hid = CurrentHourId()
+    if acct.hourId ~= hid then acct.hourId, acct.hour = hid, 0 end
+    acct.hour = acct.hour + 1
     dirty = true
     UpdateCounter()
     RefreshBoardSoon()
@@ -2335,6 +2453,10 @@ local function ShowEntryTooltip(owner, entry)
     line("Character level", charLevel and tostring(charLevel) or "?")
     line("Total jumps", Fmt(entry.total))
     line("This week", Fmt(MyWeekCount(data)))
+    if isMe or data.hourId then                     -- 1.8.0+
+        line("This hour", (entry.key == crownKey and CROWN_ICON or "") .. Fmt(HourCount(data)))
+        line("Crowns won", Fmt(isMe and (acct.crowns or 0) or data.crowns))
+    end
     local jph = JumpsPerHour(data)
     line("Jumps per hour", jph and Fmt(jph) or (isMe and "after 30 min online" or "?"))
     line("Deaths", data.deaths and Fmt(data.deaths) or "?")
@@ -2395,6 +2517,7 @@ end
 ---------------------------------------------------------------------------
 local BOARD_CATEGORIES = {
     { mode = "all",    label = "All time" },
+    { mode = "hour",   label = "This hour" },
     { mode = "week",   label = "This week" },
     { mode = "rate",   label = "Per hour" },
     { mode = "level",  label = "Level" },
@@ -2408,7 +2531,7 @@ local function BuildLeaderboardTab(page, width)
     local listHeight = ROWS * ROW_H
 
     local cats = {}
-    local catWidth = math.floor((width - 4 * 4) / #BOARD_CATEGORIES)
+    local catWidth = math.floor((width - 4 * (#BOARD_CATEGORIES - 1)) / #BOARD_CATEGORIES)
     for i, c in ipairs(BOARD_CATEGORIES) do
         local b = FlatButton(page, catWidth, 20, c.label)
         b:SetPoint("TOPLEFT", (i - 1) * (catWidth + 4), 0)
@@ -2478,7 +2601,8 @@ local function BuildLeaderboardTab(page, width)
             local isMe = entry.key == playerKey
             row.bg:SetColorTexture(1, 0.82, 0, isMe and 0.12 or 0)
             row.rank:SetText(pos and (pos .. ".") or "")
-            row.name:SetText(FactionIcon((entry.data or {}).faction) .. ColoredName(entry.key, entry.class))
+            row.name:SetText(FactionIcon((entry.data or {}).faction)
+                .. (entry.key == crownKey and CROWN_ICON or "") .. ColoredName(entry.key, entry.class))
             local data = entry.data or {}
             local rankTitle = GetJumpRank(entry.total)
             row.level:SetText(("%sLv %d %s"):format(PrestigeTag(EntryPrestige(data)), (EntryLevel(data)),
@@ -2547,7 +2671,7 @@ local function BuildLeaderboardTab(page, width)
         local mode = JumpCounterDB.ui.boardMode or "all"
         self.mode = mode
         for m, b in pairs(cats) do b:SetSelected(m == mode) end
-        scoreHeader:SetText(({ all = "Jumps", week = "This week", rate = "Per hour",
+        scoreHeader:SetText(({ all = "Jumps", hour = "This hour", week = "This week", rate = "Per hour",
             level = "Total XP", deaths = "Deaths" })[mode] or "")
 
         if self.scrollOffsetReset then
@@ -2566,6 +2690,8 @@ local function BuildLeaderboardTab(page, width)
         local note = ({
             week = SecondsUntilReset() and ("week resets in " .. FormatDuration(SecondsUntilReset()))
                 or "weeks start Monday 00:00 UTC",
+            hour = ("most jumps this hour wins the crown - %d min left"):format(
+                math.ceil((3600 - GetServerTime() % 3600) / 60)),
             rate = "online time, not AFK, shown after 30 min",
             level = "XP = jumps + challenge rewards",
             deaths = "deaths counted since v0.7.0",
@@ -2717,12 +2843,15 @@ local function BuildSettingsTab(page, width)
     SettingCheck("overtakes", "Overtakes",
         "When you pass someone on the leaderboard or they pass you (at most once per person every 10 min).")
 
-    Section("Jump duels & sound")
+    Section("Duels, crown & sound")
     SettingCheck("duels", "Random jump duels",
         "Now and then you're paired with another player who is jumping around for a 1-minute "
         .. "jump-off. Most jumps wins. At most one random duel every 30 minutes.")
     SettingCheck("duelNews", "Other players' duel results",
         "A chat line with the result when two other players finish a jump duel.")
+    SettingCheck("crownNews", "The crown",
+        "Whoever jumps most in an hour holds the crown. A chat line when someone takes it "
+        .. "(at most every 3 minutes) and when the hour's winner is decided.")
     SettingCheck("sounds", "Play sounds", "Play a sound with milestone and overtake messages.")
 
     local help = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3185,6 +3314,7 @@ events:SetScript("OnEvent", function(_, event, ...)
 
         CreateDuelFrame()
         C_Timer.NewTicker(60, MaybeStartRandomDuel)
+        C_Timer.NewTicker(5, CrownTick)
         -- Pass scores from outside the guild on to the guild now and then
         -- (random delay so guild members don't all send at once).
         C_Timer.NewTicker(RELAY_GUILD_INTERVAL, function()

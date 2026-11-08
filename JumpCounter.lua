@@ -2094,7 +2094,9 @@ do
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
 
     local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, ... }
-    local lastDuelEnd = 0             -- server time
+    -- When our last duel ended (server time) is saved account-wide in
+    -- acct.lastDuelEnd, so /reload or switching characters doesn't reset the
+    -- cooldown.
     local busyUntil = {}              -- [acct id] = server time their duel ends
     local duelResults = {}            -- other players' duels: [id] = { finish, shown, players = {} }
     local duelTicker, duelFrame
@@ -2125,10 +2127,15 @@ do
         return on(UnitOnTaxi) or on(UnitInVehicle) or on(UnitIsDeadOrGhost)
     end
 
-    -- manual = someone typed /jumps duel: skip the cooldown.
-    local function CanDuel(now, manual)
+    -- Seconds until we may duel again (0 = now). Applies to every duel,
+    -- random or started with /jumps duel (1.8.2: /jumps duel used to skip it).
+    local function CooldownLeft(now)
+        return math.max(0, DUEL_COOLDOWN - (now - (acct.lastDuelEnd or 0)))
+    end
+
+    local function CanDuel(now)
         return settings.duels and not duel and not Plain(UnitIsAFK("player")) and not CantJump()
-            and (manual or now - lastDuelEnd >= DUEL_COOLDOWN)
+            and CooldownLeft(now) == 0
     end
 
     -- Players on 1.5.0+ who jumped recently and aren't in a duel.
@@ -2171,7 +2178,7 @@ do
     local function EndDuel(d, text)
         local now = GetServerTime()
         duel = nil
-        lastDuelEnd = now
+        acct.lastDuelEnd = now
         if duelFrame then
             duelFrame.title:SetText("Jump duel vs " .. ClassColored(d.opp.name, d.opp.class))
             duelFrame.score:SetText(("You %d  -  %d"):format(d.mine, d.theirs))
@@ -2187,7 +2194,7 @@ do
             -- Nothing ever arrived from them (disconnected?): no result.
             Print(("The jump duel against %s was cancelled - no score arrived from them."):format(opp))
             EndDuel(d, "Cancelled")
-            lastDuelEnd = lastDuelEnd - DUEL_COOLDOWN + 300   -- try again soon
+            acct.lastDuelEnd = acct.lastDuelEnd - DUEL_COOLDOWN + 300   -- no result: try again soon
             return
         end
         local me, them = d.mine, d.theirs
@@ -2221,7 +2228,8 @@ do
         if d and d.state ~= "on" and now >= d.start then
             -- The invite was never confirmed.
             if d.manual and d.state == "invited" then
-                Print(("%s didn't accept the duel (busy, AFK, on a flight path or duels turned off)."):format(
+                Print(("%s didn't accept the duel (busy, AFK, on a flight path, had a duel in the last "
+                    .. "30 minutes, or duels turned off)."):format(
                     ClassColored(d.opp.name, d.opp.class)))
             end
             duel = nil
@@ -2287,7 +2295,7 @@ do
             local length = tonumber(a7) or OLD_DUEL_LENGTH
             if length < 30 or length > 600 then return end
             if a5 ~= acct.id or a2 == acct.id or not start then return end
-            if not CanDuel(now, a6 == "1") or start - now < 5 or start - now > 60 then return end
+            if not CanDuel(now) or start - now < 5 or start - now > 60 then return end
             duel = { id = id, start = start, finish = start + length, state = "accepted",
                 opp = { acct = a2, name = a3, class = (a4 ~= "" and a4) or nil }, mine = 0, theirs = 0 }
             SendDuel("DA", id, acct.id)
@@ -2395,6 +2403,9 @@ do
             Print("Jump duels are turned off - turn them on in /jumps settings.")
         elseif duel then
             Print("You're already in a jump duel.")
+        elseif CooldownLeft(GetServerTime()) > 0 then
+            Print(("You had a jump duel recently - you can duel again in %d min.")
+                :format(math.ceil(CooldownLeft(GetServerTime()) / 60)))
         else
             local opp = TryStartDuel(true)
             if opp then
@@ -3522,7 +3533,7 @@ local function BuildSettingsTab(page, width)
     Section("Duels, crown & sound")
     SettingCheck("duels", "Random jump duels",
         "Now and then you're paired with another player who is jumping around for a 1-minute "
-        .. "jump-off. Most jumps wins. At most one random duel every 30 minutes.")
+        .. "jump-off. Most jumps wins. At most one duel every 30 minutes (also with /jumps duel).")
     SettingCheck("duelNews", "Other players' duel results",
         "A chat line with the result when two other players finish a jump duel.")
     SettingCheck("crownNews", "The crown",

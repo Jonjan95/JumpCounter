@@ -259,17 +259,27 @@ end
 -- to reach PRESTIGE_LEVEL); extra XP carries over. Total jumps, ranks, total
 -- XP and challenges are kept.
 ---------------------------------------------------------------------------
-local PRESTIGE_LEVEL = 30
+-- 1.8.2: prestige at level 50 (it was 30). Stars earned before keep their
+-- old price (OLD_PRESTIGE_XP each), so nobody's level or stars change; each
+-- account tracks the XP its stars used up (prestigeSpent) and shares it.
+local PRESTIGE_LEVEL = 50
 local PRESTIGE_XP = 0
-for l = 1, PRESTIGE_LEVEL - 1 do PRESTIGE_XP = PRESTIGE_XP + XPForLevel(l) end   -- 11,600
+for l = 1, PRESTIGE_LEVEL - 1 do PRESTIGE_XP = PRESTIGE_XP + XPForLevel(l) end   -- 31,850
+local OLD_PRESTIGE_XP = 11600     -- a star from before 1.8.2 (prestige at level 30)
 
 local function EntryPrestige(data)
     return data.prestige or 0
 end
 
+-- XP used up by an entry's prestige stars. Versions before 1.8.2 don't send
+-- it; all their stars were bought at the old price.
+local function PrestigeSpent(data)
+    return data.prestigeSpent or EntryPrestige(data) * OLD_PRESTIGE_XP
+end
+
 -- Current jump level (after prestige resets): level, XP into it, XP needed.
 local function EntryLevel(data)
-    return LevelFromXP(math.max(0, EntryXP(data) - EntryPrestige(data) * PRESTIGE_XP))
+    return LevelFromXP(math.max(0, EntryXP(data) - PrestigeSpent(data)))
 end
 
 -- Gold star (the star raid marker) + number, or "" without prestige.
@@ -437,6 +447,12 @@ local CHALLENGES = {
       desc = "Win the crown 10 times.",                       progress = function() return acct.crowns or 0 end },
     { id = "crown3",   name = "Jump Monarch",      xp = 4000, goal = 50,
       desc = "Win the crown 50 times.",                       progress = function() return acct.crowns or 0 end },
+
+    -- 1.8.2: daily challenges.
+    { id = "daily1",   name = "Daily Hopper",      xp = 500,  goal = 10,
+      desc = "Complete 10 daily challenges.",                 progress = function() return acct.dailyDone or 0 end },
+    { id = "daily2",   name = "Creature of Habit", xp = 3000, goal = 100,
+      desc = "Complete 100 daily challenges.",                progress = function() return acct.dailyDone or 0 end },
 }
 
 local function CountCompleted(data)
@@ -616,6 +632,8 @@ local function InitDB()
         acct.id = table.concat(hex)
     end
     acct.prestige = acct.prestige or 0
+    -- 1.8.2: stars from before were bought at the old price (level 30).
+    acct.prestigeSpent = acct.prestigeSpent or acct.prestige * OLD_PRESTIGE_XP
     acct.challengeXP = acct.challengeXP or 0
     acct.done = acct.done or {}
     acct.stats = acct.stats or {}
@@ -647,8 +665,8 @@ local CROWN_ICON = "|TInterface\\GroupFrame\\UI-Group-LeaderIcon:14:14|t "
 local function Me()
     local wid = CurrentWeekId()
     local me = { total = 0, week = 0, weekId = wid, deaths = 0, rate = { jumps = 0, seconds = 0 },
-        challengeXP = acct.challengeXP + (acct.duelXP or 0) + (acct.crownXP or 0),
-        prestige = acct.prestige, done = acct.done,
+        challengeXP = acct.challengeXP + (acct.duelXP or 0) + (acct.crownXP or 0) + (acct.dailyXP or 0),
+        prestige = acct.prestige, prestigeSpent = acct.prestigeSpent, done = acct.done,
         duelWins = acct.duelWins or 0, faction = MyFaction(),
         hourId = acct.hourId, hour = acct.hour, crowns = acct.crowns or 0,
         class = charData.class, display = charData.display }
@@ -846,6 +864,7 @@ function ScoreMessage()
     local suffix = ":" .. (acct.duelWins or 0) .. ":" .. (MyFaction() or "")
         .. ":" .. (acct.duelLosses or 0) .. ":" .. (acct.duelDraws or 0)
         .. ":" .. CurrentHourId() .. ":" .. HourCount(me) .. ":" .. (acct.crowns or 0)
+        .. ":" .. (acct.prestigeSpent or 0)                     -- 1.8.2: XP used by prestige stars
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -1014,7 +1033,8 @@ do
             n(data.duelWins), n(data.version), n(data.seen), (data.hops or 0) + 1,
             -- 1.7.3: after the hop count, so older versions ignore them
             n(data.duelLosses), n(data.duelDraws),
-            n(data.hourId), n(data.hour), n(data.crowns) }, ":")   -- 1.8.0
+            n(data.hourId), n(data.hour), n(data.crowns),          -- 1.8.0
+            n(data.prestigeSpent) }, ":")                           -- 1.8.2
     end
 
     -- Up to RELAY_BATCH passable scores (newest first) that pass filter(data).
@@ -1091,7 +1111,7 @@ do
     function ApplyRelay(msg, via)
         local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
             rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws,
-            rHourId, rHour, rCrowns = strsplit(":", msg)
+            rHourId, rHour, rCrowns, rSpent = strsplit(":", msg)
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
@@ -1129,6 +1149,7 @@ do
         entry.prestige, entry.duelWins = num(rPrestige), num(rDuels)
         entry.duelLosses, entry.duelDraws = num(rLosses), num(rDraws)   -- nil before 1.7.3
         entry.hourId, entry.hour, entry.crowns = num(rHourId), num(rHour), num(rCrowns)   -- 1.8.0
+        entry.prestigeSpent = num(rSpent)                                                -- 1.8.2
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
         entry.hops = tonumber(rHops) or RELAY_MAX_HOPS
@@ -1193,7 +1214,7 @@ local function HandleMessage(msg, key, display, reply, via)
     end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
         charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction,
-        duelLosses, duelDraws, hourId, hourCount, crowns = strsplit(":", msg)
+        duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -1270,6 +1291,7 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.hourId = tonumber(hourId)           -- these three are nil before 1.8.0
         entry.hour = tonumber(hourCount)
         entry.crowns = tonumber(crowns)
+        entry.prestigeSpent = tonumber(prestigeSpent)   -- nil before 1.8.2
         entry.via, entry.hops = via, 0            -- heard directly
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
@@ -1734,6 +1756,7 @@ local function DoPrestige()
         return
     end
     acct.prestige = acct.prestige + 1
+    acct.prestigeSpent = acct.prestigeSpent + PRESTIGE_XP
     knownLevel = EntryLevel(Me())
     dirty = true
     Notify(GOLD:format(("%sPrestige %d! Your jump level starts over - total jumps and ranks are kept.")
@@ -1796,6 +1819,164 @@ function CheckChallenges()
     CheckLevelUp()
 end
 
+---------------------------------------------------------------------------
+-- Daily challenges: three a day (easy, medium, hard) for extra XP, reset
+-- with the game's daily reset. Everyone gets the same three each day (picked
+-- from the day's id), so friends can race each other on them. Only things
+-- you can do on your own.
+---------------------------------------------------------------------------
+local Daily = {}
+do
+    local TIERS = {
+        { key = "easy",   label = "Easy",   xp = 100, color = "|cff1eff00" },
+        { key = "medium", label = "Medium", xp = 250, color = "|cff0070dd" },
+        { key = "hard",   label = "Hard",   xp = 500, color = "|cffa335ee" },
+    }
+    -- stat: what's counted today. bestMinute/bestHour: most jumps within one
+    -- minute / one clock hour; streak: most jumps in a row without dying.
+    local POOLS = {
+        easy = {
+            { stat = "jumps",      goal = 200,  desc = "Jump 200 times." },
+            { stat = "mounted",    goal = 50,   desc = "Jump 50 times while mounted." },
+            { stat = "swim",       goal = 25,   desc = "Jump 25 times in water." },
+            { stat = "zones",      goal = 3,    desc = "Jump in 3 different zones." },
+            { stat = "resting",    goal = 100,  desc = "Jump 100 times in a city or inn." },
+            { stat = "bestMinute", goal = 25,   desc = "Jump 25 times within one minute." },
+        },
+        medium = {
+            { stat = "jumps",      goal = 1000, desc = "Jump 1,000 times." },
+            { stat = "mounted",    goal = 300,  desc = "Jump 300 times while mounted." },
+            { stat = "combat",     goal = 150,  desc = "Jump 150 times in combat." },
+            { stat = "zones",      goal = 6,    desc = "Jump in 6 different zones." },
+            { stat = "bestHour",   goal = 300,  desc = "Jump 300 times in one hour." },
+            { stat = "streak",     goal = 500,  desc = "Jump 500 times without dying." },
+            { stat = "bestMinute", goal = 45,   desc = "Jump 45 times within one minute." },
+        },
+        hard = {
+            { stat = "jumps",      goal = 3000, desc = "Jump 3,000 times." },
+            { stat = "bestHour",   goal = 1000, desc = "Jump 1,000 times in one hour." },
+            { stat = "bestMinute", goal = 65,   desc = "Jump 65 times within one minute." },
+            { stat = "combat",     goal = 500,  desc = "Jump 500 times in combat." },
+            { stat = "instance",   goal = 300,  desc = "Jump 300 times in a dungeon or raid." },
+            { stat = "streak",     goal = 2000, desc = "Jump 2,000 times without dying." },
+            { stat = "zones",      goal = 12,   desc = "Jump in 12 different zones." },
+        },
+    }
+
+    local function SecondsLeft()
+        if C_DateAndTime and C_DateAndTime.GetSecondsUntilDailyReset then
+            local secs = Plain(C_DateAndTime.GetSecondsUntilDailyReset())
+            if secs and secs > 0 then return secs end
+        end
+        return 86400 - GetServerTime() % 86400      -- fallback: midnight UTC
+    end
+    Daily.SecondsLeft = SecondsLeft
+
+    -- The day's id: the hour (since 1970) of the next daily reset - the same
+    -- on every computer.
+    local function DayId()
+        return math.floor((GetServerTime() + SecondsLeft()) / 3600 + 0.5)
+    end
+
+    -- Today's state, started fresh when the day changes.
+    local function State()
+        local d = acct.daily
+        local id = DayId()
+        if not d or d.day ~= id then
+            d = { day = id, c = {}, zones = {}, done = {} }
+            acct.daily = d
+        end
+        return d
+    end
+
+    -- The day's three challenges, the same for everyone; no two on the same stat.
+    local picked = {}
+    local function Today()
+        local id = DayId()
+        if picked.day == id then return picked.list end
+        local used, list = {}, {}
+        for t, tier in ipairs(TIERS) do
+            local pool = POOLS[tier.key]
+            local i = math.floor(((id * 2654435761 + t * 40503) % 4294967296) / 65536) % #pool + 1
+            for _ = 1, #pool do
+                if not used[pool[i].stat] then break end
+                i = i % #pool + 1
+            end
+            used[pool[i].stat] = true
+            list[t] = { tier = tier, def = pool[i] }
+        end
+        picked.day, picked.list = id, list
+        return list
+    end
+
+    local function Progress(d, def) return math.min(d.c[def.stat] or 0, def.goal) end
+
+    -- For the window: { label, color, desc, goal, progress, xp, done } x3.
+    function Daily.List()
+        local d = State()
+        local out = {}
+        for i, e in ipairs(Today()) do
+            out[i] = { label = e.tier.label, color = e.tier.color, desc = e.def.desc, goal = e.def.goal,
+                progress = Progress(d, e.def), xp = e.tier.xp, done = d.done[e.tier.key] }
+        end
+        return out
+    end
+
+    function Daily.DoneCount()
+        local d, n = State(), 0
+        for _, tier in ipairs(TIERS) do if d.done[tier.key] then n = n + 1 end end
+        return n
+    end
+
+    local function Check()
+        local d = State()
+        for _, e in ipairs(Today()) do
+            local key = e.tier.key
+            if not d.done[key] and (d.c[e.def.stat] or 0) >= e.def.goal then
+                d.done[key] = time()
+                acct.dailyXP = (acct.dailyXP or 0) + e.tier.xp
+                acct.dailyDone = (acct.dailyDone or 0) + 1
+                dirty = true
+                if settings.myProgress then
+                    Notify(GOLD:format(("Daily challenge complete (%s): %s (+%d XP)")
+                        :format(e.tier.label, e.def.desc, e.tier.xp)), true)
+                end
+            end
+        end
+    end
+
+    -- After every counted jump. flags: what kind of jump (mounted, swim, ...).
+    function Daily.OnJump(flags, mapID, minuteCount)
+        local d = State()
+        local c = d.c
+        c.jumps = (c.jumps or 0) + 1
+        for name in pairs(flags) do c[name] = (c[name] or 0) + 1 end
+        if mapID and not d.zones[mapID] then
+            d.zones[mapID] = true
+            c.zones = (c.zones or 0) + 1
+        end
+        c.bestMinute = math.max(c.bestMinute or 0, minuteCount or 0)
+        if acct.hourId == CurrentHourId() then c.bestHour = math.max(c.bestHour or 0, acct.hour or 0) end
+        d.run = (d.run or 0) + 1
+        c.streak = math.max(c.streak or 0, d.run)
+        Check()
+    end
+
+    function Daily.OnDeath()
+        State().run = 0
+    end
+
+    -- Once a day, a short chat line about the new challenges.
+    function Daily.Announce()
+        local d = State()
+        if d.announced or not settings.myProgress then return end
+        d.announced = true
+        local parts = {}
+        for _, e in ipairs(Today()) do table.insert(parts, e.tier.color .. e.def.desc .. "|r") end
+        Print("Today's challenges: " .. table.concat(parts, "  ") .. " |cff999999(/jumps challenges)|r")
+    end
+end
+
 -- Longest run of consecutive days in a set of "YYYY-MM-DD" keys.
 local function LongestStreak(days)
     local nums = {}
@@ -1827,7 +2008,8 @@ end
 -- Record what kind of jump this was. inWater = it was a surface jump.
 local function TrackJump(inWater)
     local st = acct.stats
-    local function inc(name) st[name] = (st[name] or 0) + 1 end
+    local flags = {}                  -- for today's daily challenges
+    local function inc(name) st[name] = (st[name] or 0) + 1; flags[name] = true end
     local plain = Plain
 
     if plain(IsMounted()) then inc("mounted") end
@@ -1880,6 +2062,8 @@ local function TrackJump(inWater)
 
     inc("sinceDeath")
     st.bestSinceDeath = math.max(st.bestSinceDeath or 0, st.sinceDeath)
+    flags.sinceDeath = nil
+    Daily.OnJump(flags, mapID, #minuteJumps)
 
     CheckChallenges()
 end
@@ -2778,6 +2962,9 @@ local function BuildOverviewTab(page, width)
         { label = "Total XP", get = function() return Fmt(EntryXP(me)) end },
         { label = "Challenges", get = function()
             return ("%d / %d"):format(CountCompleted(acct), #CHALLENGES) end },
+        { label = "Today's challenges", get = function()
+            return ("%d / 3"):format(Daily.DoneCount()) end,
+          tip = "Three new challenges every day - easy, medium and hard - for extra XP. See the Challenges tab." },
         { label = "Crowns won", get = function() return Fmt(acct.crowns or 0) end,
           tip = "Hours you finished with the most jumps of everyone you can see." },
         { label = "Jump duels", get = function()
@@ -2795,7 +2982,8 @@ local function BuildOverviewTab(page, width)
     hint:SetPoint("BOTTOMLEFT", 4, 4)
     hint:SetPoint("BOTTOMRIGHT", -4, 4)
     hint:SetJustifyH("LEFT")
-    hint:SetText("Every jump on any of your characters gives 1 XP; challenges, duels and crowns give more.")
+    hint:SetText("Every jump on any of your characters gives 1 XP; challenges, daily challenges, "
+        .. "duels and crowns give more.")
 
     function page:Refresh()
         me = Me()
@@ -2820,7 +3008,8 @@ local function BuildOverviewTab(page, width)
         else
             prestigeButton:Hide()
             prestigeInfo:Show()
-            prestigeInfo:SetText(("Prestige at level %d"):format(PRESTIGE_LEVEL))
+            local pct = math.floor(math.max(0, EntryXP(me) - PrestigeSpent(me)) / PRESTIGE_XP * 100)
+            prestigeInfo:SetText(("Prestige at level %d\n%d%% there"):format(PRESTIGE_LEVEL, math.min(pct, 99)))
         end
         for _, r in ipairs(left) do r.value:SetText(r.get()) end
         for _, r in ipairs(right) do r.value:SetText(r.get()) end
@@ -3081,12 +3270,56 @@ end
 ---------------------------------------------------------------------------
 local function BuildChallengesTab(page, width)
     local ROW_H = 50
-    local summary = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    summary:SetPoint("TOPLEFT", 4, -4)
+    local DAILY_TOP, DAILY_ROW = -22, 30
+
+    -- Today's three daily challenges.
+    local todayTitle = SectionTitle(page, "Today's challenges")
+    todayTitle:SetPoint("TOPLEFT", 4, -2)
+    todayTitle.line:SetWidth(width - 8)
+    local resets = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    resets:SetPoint("TOPRIGHT", -6, -4)
+    local daily = {}
+    for i = 1, 3 do
+        local r = CreateFrame("Frame", nil, page)
+        r:SetSize(width - 8, DAILY_ROW - 4)
+        r:SetPoint("TOPLEFT", 4, DAILY_TOP - (i - 1) * DAILY_ROW)
+        r.bg = r:CreateTexture(nil, "BACKGROUND")
+        r.bg:SetAllPoints()
+        r.tier = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        r.tier:SetPoint("LEFT", 8, 0)
+        r.tier:SetWidth(56)
+        r.tier:SetJustifyH("LEFT")
+        r.desc = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.desc:SetPoint("LEFT", 66, 0)
+        r.bar = CreateFrame("StatusBar", nil, r)
+        r.bar:SetSize(150, 12)
+        r.bar:SetPoint("RIGHT", -84, 0)
+        r.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+        local bbg = r.bar:CreateTexture(nil, "BACKGROUND")
+        bbg:SetAllPoints()
+        bbg:SetColorTexture(0, 0, 0, 0.6)
+        r.bar.text = r.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.bar.text:SetPoint("CENTER")
+        r.check = r:CreateTexture(nil, "OVERLAY")
+        r.check:SetSize(16, 16)
+        r.check:SetPoint("RIGHT", -84 - 150 - 6, 0)
+        r.check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+        r.xp = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.xp:SetPoint("RIGHT", -8, 0)
+        daily[i] = r
+    end
+
+    -- All challenges.
+    local LIST_TOP = DAILY_TOP - 3 * DAILY_ROW - 8
+    local allTitle = SectionTitle(page, "Challenges")
+    allTitle:SetPoint("TOPLEFT", 4, LIST_TOP)
+    allTitle.line:SetWidth(width - 8)
+    local summary = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    summary:SetPoint("LEFT", allTitle, "RIGHT", 12, 0)
 
     local hide = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
     hide:SetSize(22, 22)
-    hide:SetPoint("TOPRIGHT", -120, 0)
+    hide:SetPoint("TOPRIGHT", -120, LIST_TOP + 4)
     local hideText = hide:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     hideText:SetPoint("LEFT", hide, "RIGHT", 2, 1)
     hideText:SetText("Hide completed")
@@ -3096,7 +3329,7 @@ local function BuildChallengesTab(page, width)
     end)
 
     local scroll = CreateFrame("ScrollFrame", "JumpCounterMainChallengeScroll", page, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 0, -26)
+    scroll:SetPoint("TOPLEFT", 0, LIST_TOP - 22)
     scroll:SetPoint("BOTTOMRIGHT", -24, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(width - 28, #CHALLENGES * ROW_H)
@@ -3148,8 +3381,30 @@ local function BuildChallengesTab(page, width)
     function page:Refresh()
         local hideDone = JumpCounterDB.ui.hideDone
         hide:SetChecked(hideDone)
-        summary:SetText(("%d / %d complete  |cffffffff+%s XP earned|r")
+        summary:SetText(("%d / %d complete, +%s XP")
             :format(CountCompleted(acct), #CHALLENGES, Fmt(acct.challengeXP)))
+
+        resets:SetText("New challenges in " .. FormatDuration(Daily.SecondsLeft()))
+        for i, d in ipairs(Daily.List()) do
+            local r = daily[i]
+            r.tier:SetText(d.color .. d.label .. "|r")
+            r.desc:SetText(d.desc)
+            r.xp:SetText("+" .. d.xp .. " XP")
+            r.bar:SetMinMaxValues(0, d.goal)
+            r.bar:SetValue(d.progress)
+            r.bar.text:SetText(d.done and "Done!" or ("%s / %s"):format(Fmt(d.progress), Fmt(d.goal)))
+            if d.done then
+                r.bg:SetColorTexture(0.35, 0.28, 0.05, 0.35)
+                r.bar:SetStatusBarColor(1, 0.82, 0)
+                r.check:Show()
+                r.desc:SetTextColor(1, 0.82, 0)
+            else
+                r.bg:SetColorTexture(1, 1, 1, 0.05)
+                r.bar:SetStatusBarColor(0.1, 0.6, 0.1)
+                r.check:Hide()
+                r.desc:SetTextColor(1, 1, 1)
+            end
+        end
 
         -- Unfinished first (closest to done at the top), finished at the bottom.
         local order = {}
@@ -3535,6 +3790,7 @@ local function OnPlayerDead()
 
     charData.deaths = (charData.deaths or 0) + 1
     acct.stats.sinceDeath = 0           -- "without dying" challenges start over
+    Daily.OnDeath()
     dirty = true
     UpdateCounter()
     RefreshBoardSoon()
@@ -3720,6 +3976,7 @@ events:SetScript("OnEvent", function(_, event, ...)
         -- Updated since we last saw a newer version? Then forget it.
         if JumpCounterDB.newestVersion and not NewestVersion() then JumpCounterDB.newestVersion = nil end
         C_Timer.After(5, ShowUpdateNotice)
+        C_Timer.After(7, function() Daily.Announce() end)
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
         CreateCounterFrame()
         CreateMainFrame()

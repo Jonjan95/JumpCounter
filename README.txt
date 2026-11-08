@@ -25,19 +25,18 @@ OPEN IT
 
   Type /jumps, click the JumpingCounter button on the minimap (drag it to
   move it, hide it in Settings), or use the addon menu next to the minimap.
-  Everything is in that one window:
+  Everything is in that one window, with tabs along the bottom:
 
-    Top        your name, prestige stars, jump level, rank, next rank and
-               an XP bar. A "Prestige!" button appears here at level 30.
-    Stat row   total jumps, this week, jumps per hour, deaths, challenges
-               and your position on the leaderboard.
-    Tabs       Leaderboard - All time / This hour / This week / Per hour /
-                             Level / Deaths.
-                             Hover a player for all their details. Your own
-                             row is always shown at the bottom.
-               Challenges  - progress on every challenge, closest first.
-               Settings    - which chat messages you get, and the small
-                             on-screen counter.
+    Overview     your jump level, rank, next rank, XP bar and all your
+                 numbers. A "Prestige!" button appears here at level 50.
+    Leaderboard  everyone you can see: level, jumps, this hour, this week,
+                 per hour and deaths. Click a column header to sort by it,
+                 hover a player for all their details. Your own row is
+                 always shown at the bottom.
+    Challenges   today's three daily challenges, then every challenge,
+                 closest to done first.
+    Settings     which chat messages you get, and the small on-screen
+                 counter.
 
 HOW SCORES SYNC
   Friends on v1.1.0 or newer see your whole account as one row. Friends on
@@ -63,11 +62,16 @@ CHAT MESSAGES (change them in the Settings tab)
 JUMP LEVELS, CHALLENGES & PRESTIGE
   Every jump on any of your characters gives 1 XP, and challenges (once per
   account) give bonus XP (about level 8 at 1,000 XP, 27 at 10,000). At jump
-  level 30 you can prestige: your level goes back to 1 and you get a star.
-  Total jumps, ranks, total XP and challenges are kept.
+  level 50 you can prestige: your level goes back to 1 and you get a star.
+  Total jumps, ranks, total XP and challenges are kept. (Before v1.8.2 it
+  was level 30 - stars earned then are kept as they are.)
 
   There are lots of challenges to find - open the Challenges tab to see
   what you're working towards.
+
+  DAILY CHALLENGES: three new ones every day - easy, medium and hard - for
+  extra XP. Everyone gets the same three, so you can race your friends.
+  They're at the top of the Challenges tab and reset with the daily reset.
 
 JUMP DUELS
   Now and then two players who are jumping around get paired for a
@@ -99,7 +103,7 @@ COMMANDS (/jumps or /jc)
   /jumps board       open it on the leaderboard
   /jumps challenges  open it on challenges
   /jumps settings    open it on settings
-  /jumps prestige    prestige (at jump level 30)
+  /jumps prestige    prestige (at jump level 50)
   /jumps counter     show/hide the small on-screen counter
   /jumps minimap     show/hide the minimap button
   /jumps name <full name>  set this character's full name if only the

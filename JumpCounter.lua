@@ -3076,6 +3076,8 @@ local BOARD_COLUMNS = {
     { label = "Player",   width = 152, justify = "LEFT" },
     { label = "Level",    width = 58,  justify = "LEFT",  sort = "level",
       tip = "Jump level (and prestige stars). Sorts by total XP." },
+    { label = "Title",    width = 120, justify = "LEFT",
+      tip = "Jump rank title, earned by all-time jumps." },
     { label = "Jumps",    width = 70,  justify = "RIGHT", sort = "all",    tip = "All-time jumps." },
     { label = "Hour",     width = 50,  justify = "RIGHT", sort = "hour",
       tip = "Jumps this hour. The most holds the crown." },
@@ -3228,12 +3230,14 @@ local function BuildLeaderboardTab(page, width)
                 .. (entry.key == crownKey and CROWN_ICON or "") .. ColoredName(entry.key, entry.class))
             c[3]:SetText(PrestigeTag(EntryPrestige(data)) .. ((sort == "level") and "" or "|cffc8c8c8")
                 .. (EntryLevel(data)) .. ((sort == "level") and "" or "|r"))
-            c[4]:SetText(num(entry.all, "all"))
-            c[5]:SetText(num(entry.hour, "hour"))
-            c[6]:SetText(num(entry.week, "week"))
-            c[7]:SetText(entry.rate and num(entry.rate, "rate") or GRAY:format("-"))
-            c[8]:SetText(num(entry.deaths, "deaths"))
-            c[9]:SetText(entry.duels and num(entry.duelWins or 0, "duels") or GRAY:format("-"))
+            local title = GetJumpRank(entry.total)
+            c[4]:SetText(title and ("|cffffd100" .. title .. "|r") or GRAY:format("-"))
+            c[5]:SetText(num(entry.all, "all"))
+            c[6]:SetText(num(entry.hour, "hour"))
+            c[7]:SetText(num(entry.week, "week"))
+            c[8]:SetText(entry.rate and num(entry.rate, "rate") or GRAY:format("-"))
+            c[9]:SetText(num(entry.deaths, "deaths"))
+            c[10]:SetText(entry.duels and num(entry.duelWins or 0, "duels") or GRAY:format("-"))
         end
         return row
     end
@@ -3610,7 +3614,7 @@ local TABS = {
 }
 
 local function CreateMainFrame()
-    local W, H = 640, 520
+    local W, H = 760, 520
     local f
     if HasTemplate("ButtonFrameTemplate") then
         f = CreateFrame("Frame", "JumpCounterMain", UIParent, "ButtonFrameTemplate")

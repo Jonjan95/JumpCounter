@@ -712,6 +712,59 @@ local function ParseCharacters(text)
     return list
 end
 
+local function FirstWord(name)
+    return (name:match("^(%S+)") or name):lower()
+end
+
+-- Remove leftover rows that newer data has replaced. Old versions saved
+-- players under their first name only ("Lo" next to "Lo Oz"), or under a
+-- different realm spelling, so the same player could show up twice:
+--  * a row from before 1.1.0 for a name that is now part of a 1.1.0+
+--    account (or one of your own characters) is dropped;
+--  * a first-name-only row is dropped when a newer row has the full name;
+--  * of two rows with the same full name, the older one is dropped.
+local function PruneStalePeers()
+    local peers = JumpCounterDB.peers
+    local covered = {}    -- full names / "first:" first names of known accounts
+    local function cover(name)
+        if not name or name == "" then return end
+        covered[name:lower()] = true
+        covered["first:" .. FirstWord(name)] = true
+    end
+    for _, c in pairs(JumpCounterDB.chars) do cover(c.display or c.name) end
+    cover(UnitName("player"))
+
+    local fullSeen = {}   -- first name -> newest update of a row with a full name
+    for _, data in pairs(peers) do
+        if data.acct then
+            cover(data.display)
+            for _, c in ipairs(ParseCharacters(data.characters)) do cover(c.name) end
+        end
+        if data.display and data.display:find("%s") then
+            local f = FirstWord(data.display)
+            fullSeen[f] = math.max(fullSeen[f] or 0, data.seen or 0)
+            local full = data.display:lower()
+            fullSeen[full] = math.max(fullSeen[full] or 0, data.seen or 0)
+        end
+    end
+
+    for key, data in pairs(peers) do
+        if not data.acct then
+            local name = data.display or key:match("^[^-]+") or key
+            local stale
+            if name:find("%s") then
+                -- Same full name: keep only the most recently updated row.
+                local full = name:lower()
+                stale = covered[full] or (fullSeen[full] or 0) > (data.seen or 0)
+            else
+                local f = FirstWord(name)
+                stale = covered["first:" .. f] or (fullSeen[f] and fullSeen[f] >= (data.seen or 0))
+            end
+            if stale then peers[key] = nil end
+        end
+    end
+end
+
 local function BroadcastScore(discover)
     Send(ScoreMessage(), discover)
     dirty = false
@@ -835,13 +888,6 @@ local function HandleMessage(msg, key, display, reply)
                     JumpCounterDB.peers[otherKey] = nil
                 end
             end
-            -- Their characters' rows saved from before they updated.
-            local realm = key:match("%-(.+)$")
-            for _, c in ipairs(ParseCharacters(characters)) do
-                local altKey = (c.name:match("^(%S+)") or c.name) .. "-" .. (realm or "")
-                local old = JumpCounterDB.peers[altKey]
-                if altKey ~= key and old and not old.acct then JumpCounterDB.peers[altKey] = nil end
-            end
             -- First account-wide score from them: the jump from a single
             -- character's total to the account total isn't a real gain, so
             -- don't announce ranks or overtakes for it.
@@ -868,6 +914,8 @@ local function HandleMessage(msg, key, display, reply)
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
         JumpCounterDB.peers[key] = entry
+        PruneStalePeers()
+        if JumpCounterDB.peers[key] ~= entry then return end   -- itself a leftover copy
         OnPeerScore(key, oldTotal, total, entry.class, oldPrestige, entry.prestige)
 
         if version and version ~= "" and IsNewerVersion(version, VERSION) and not warnedVersion then
@@ -2408,6 +2456,7 @@ events:RegisterEvent("PLAYER_LEVEL_UP")
 events:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
         InitDB()
+        PruneStalePeers()
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
         CreateCounterFrame()
         CreateMainFrame()

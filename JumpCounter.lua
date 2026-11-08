@@ -2214,10 +2214,11 @@ do
     local function DuelCandidates(now)
         local list = {}
         for key, data in pairs(JumpCounterDB.peers) do
-            if data.acct and data.version and not IsNewerVersion(DUEL_MIN_VERSION, data.version)
-                and (data.hops or 0) == 0          -- heard directly, so we can reach them
+            -- Cheap checks first: this runs every minute over everyone we know.
+            if data.acct and (data.hops or 0) == 0          -- heard directly, so we can reach them
                 and time() - (data.lastJumped or 0) <= DUEL_ACTIVE and (busyUntil[data.acct] or 0) < now
-                and PairLeft(now, data.acct) == 0 then
+                and PairLeft(now, data.acct) == 0
+                and data.version and not IsNewerVersion(DUEL_MIN_VERSION, data.version) then
                 table.insert(list, { acct = data.acct, name = DisplayName(key), class = data.class })
             end
         end

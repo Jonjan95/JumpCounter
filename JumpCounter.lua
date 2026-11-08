@@ -1307,7 +1307,7 @@ end
 -- via: "GUILD", "GROUP", "WHISPER" or "BNET".
 local function HandleMessage(msg, key, display, reply, via)
     if msg:match("^D[QAGPF]:") then
-        OnDuelMessage(msg)
+        OnDuelMessage(msg, reply, via)
         return
     end
     if msg:match("^R:") then
@@ -2192,7 +2192,8 @@ do
     local DUEL_MIN_VERSION = "1.7.0"   -- older versions would count 3 minutes
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
 
-    local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, ... }
+    local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, route, ... }
+    local SendDuelTo
     -- When our last duel ended (server time) is saved account-wide in
     -- acct.lastDuelEnd, so /reload or switching characters doesn't reset the
     -- cooldown.
@@ -2213,6 +2214,27 @@ do
         local parts = { ... }
         for i = 1, select("#", ...) do parts[i] = tostring(parts[i] or "") end
         Send(table.concat(parts, ":"))
+    end
+
+    -- Only to the opponent: the way their messages reach us (whisper /
+    -- Battle.net directly, else guild or group chat). Unknown: everyone.
+    function SendDuelTo(d, ...)
+        local parts = { ... }
+        for i = 1, select("#", ...) do parts[i] = tostring(parts[i] or "") end
+        local msg = table.concat(parts, ":")
+        local route = d.route
+        if route and route.reply then
+            route.reply(msg)
+        elseif route and route.via == "GUILD" and IsInGuild() then
+            Enqueue(msg, "GUILD")
+        elseif route and route.via == "GROUP" then
+            for _, ch in ipairs(GetChannels()) do
+                if ch ~= "GUILD" then Enqueue(msg, ch) return end
+            end
+            Send(msg)
+        else
+            Send(msg)
+        end
     end
 
     -- True when we can't jump right now: on a flight path, in a vehicle or dead.
@@ -2381,9 +2403,11 @@ do
             if now >= d.finish and not d.sentFinal then
                 d.sentFinal, d.doneAt = true, now
                 SendDuel("DF", d.id, acct.id, Clean(MyDuelName()), charData.class, d.mine)
-            elseif now < d.finish and d.mine ~= (d.sentCount or 0) and now - (d.lastProgress or 0) >= 5 then
-                d.sentCount, d.lastProgress = d.mine, now
-                SendDuel("DP", d.id, acct.id, d.mine)
+            elseif now < d.finish and d.mine ~= (d.sentCount or 0) and GetTime() - (d.lastProgress or 0) >= 0.95 then
+                -- 1.8.3: about once a second (was every 5 s), and only to the
+                -- opponent, so it stays within the game's message limit.
+                d.sentCount, d.lastProgress = d.mine, GetTime()
+                SendDuelTo(d, "DP", d.id, acct.id, d.mine)
             end
             if d.sentFinal and (d.oppFinal or now - d.doneAt >= 15) then FinishDuel() end
         end
@@ -2429,10 +2453,18 @@ do
         return opp
     end
 
-    function OnDuelMessage(msg)
+    function OnDuelMessage(msg, reply, via)
         local tag, id, a1, a2, a3, a4, a5, a6, a7 = strsplit(":", msg)
         local now = GetServerTime()
         if not id or id == "" then return end
+        -- Remember how this message reached us, to send our progress back the
+        -- same way (a direct route - whisper / Battle.net - beats guild/group).
+        local from = (tag == "DQ" or tag == "DG") and a2 or a1
+        local function Learn()
+            if duel and duel.id == id and duel.opp.acct == from then
+                if reply or not duel.route then duel.route = { reply = reply, via = via } end
+            end
+        end
         if tag == "DQ" then
             -- Invite: a1 start, a2 their acct, a3 name, a4 class, a5 target acct, a6 manual, a7 length
             local start = tonumber(a1)
@@ -2442,9 +2474,11 @@ do
             if not CanDuel(now, a2) or start - now < 5 or start - now > 60 then return end
             duel = { id = id, start = start, finish = start + length, state = "accepted",
                 opp = { acct = a2, name = a3, class = (a4 ~= "" and a4) or nil }, mine = 0, theirs = 0 }
+            Learn()
             SendDuel("DA", id, acct.id)
             StartDuelTicker()
         elseif tag == "DA" then
+            Learn()
             if duel and duel.id == id and duel.state == "invited" and a1 == duel.opp.acct then
                 duel.state = "on"
                 SendDuel("DG", id, duel.start, acct.id, Clean(MyDuelName()), charData.class,
@@ -2462,8 +2496,10 @@ do
             end
         elseif tag == "DP" then
             if duel and duel.id == id and a1 == duel.opp.acct then
+                Learn()
                 duel.theirs = math.max(duel.theirs, tonumber(a2) or 0)
                 duel.heard = true
+                UpdateDuelFrame(now)
             end
         elseif tag == "DF" then
             -- Final: a1 acct, a2 name, a3 class, a4 count

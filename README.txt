@@ -86,10 +86,12 @@ JUMP DUELS
   the results of others' duels) in Settings.
   Both players need v1.7.0 or newer.
 
-  DUEL RANKS: every duel gives duel points - a win +20, a draw +10 and
-  a loss +5 for playing, plus a bonus when luck isn't on your side.
-  Points never go down, and they move you up through the duel ranks.
-  Others see your rank and wins (hover your name, or sort the
+  DUEL RANKS: duels are rated, like chess. Win and you take duel points
+  from your opponent - more for beating someone ranked higher - and lose
+  and they take yours (less if they were ranked higher). New duelists
+  don't lose points until they reach the third rank, and after 3 losses in
+  a row the next one is free. So the top ranks belong to whoever wins the
+  most. Others see your rank and wins (hover your name, or sort the
   leaderboard by the Duel rank column).
 
 THE CROWN

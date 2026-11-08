@@ -217,10 +217,28 @@ local JUMP_RANKS = {
     { 5000000, "Defier of Worlds" },
 }
 
--- Duel ranks (1.8.2): duel points only ever go up - a win +20, a draw +10,
--- a loss +5 for playing, and every 3rd loss in a row +15 extra - so losing
--- never sets you back. Only wins and rank are shown to others.
-local DUEL_POINTS = { win = 20, draw = 10, loss = 5, comeback = 15, comebackEvery = 3 }
+-- Duel ranks. 1.8.3: a rating (like chess): the winner gains what the loser
+-- loses, weighted by their duel points - beating someone stronger pays more,
+-- losing to them costs less. Below PROTECTED points you only gain (learning
+-- the ropes), and after 3 losses in a row the next loss is free (a shield).
+-- Points from before 1.8.3 (win +20, draw +10, loss +5) carry over.
+-- (One table, not separate locals: Lua 5.1 allows 200 per file.)
+local DUEL_POINTS = {
+    win = 20, draw = 10, loss = 5,        -- the 1.8.2 rules, for converting old duels
+    K = 32, scale = 400,                  -- rating: +-16 against an equal opponent
+    protected = 120,                      -- Contender: no losses below this
+    shieldAfter = 3,                      -- losses in a row before a free one
+}
+
+-- Points change for us: result 1 = win, 0.5 = draw, 0 = loss.
+function DUEL_POINTS.Change(mine, theirs, result)
+    local expected = 1 / (1 + 10 ^ (((theirs or mine) - mine) / DUEL_POINTS.scale))
+    local change = DUEL_POINTS.K * (result - expected)
+    change = change >= 0 and math.floor(change + 0.5) or -math.floor(-change + 0.5)
+    if result == 1 then change = math.max(2, math.min(30, change)) end
+    if result == 0 then change = math.min(-2, math.max(-30, change)) end
+    return change
+end
 local DUEL_RANKS = {
     { 0,    "Unranked" },
     { 20,   "Novice Duelist" },
@@ -2295,42 +2313,53 @@ do
             return
         end
         local me, them = d.mine, d.theirs
-        local xp, text, short, points = DUEL_PLAY_XP
-        local rankBefore = DuelRank(acct.duelPoints)
-        local comeback = false
-        if me > them then
+        local xp, text, short = DUEL_PLAY_XP
+        local myPoints = acct.duelPoints or 0
+        local rankBefore = DuelRank(myPoints)
+        -- Their duel points, if we know them (1.8.2+); otherwise treat them as equal.
+        local theirPoints
+        for _, data in pairs(JumpCounterDB.peers) do
+            if data.acct == d.opp.acct and data.duelPoints then theirPoints = data.duelPoints end
+        end
+        local result = (me > them and 1) or (me < them and 0) or 0.5
+        local change = DUEL_POINTS.Change(myPoints, theirPoints, result)
+        local note = ""
+        if change < 0 and myPoints < DUEL_POINTS.protected then
+            change, note = 0, " |cff999999(no points lost below " .. DuelRank(DUEL_POINTS.protected) .. ")|r"
+        elseif result == 0 and (acct.lossStreak or 0) >= DUEL_POINTS.shieldAfter then
+            change, note = 0, " |cff999999(shield: no points lost after 3 losses in a row)|r"
+        end
+        change = math.max(change, -myPoints)            -- never below 0
+        local pts = (change >= 0 and "+" or "") .. change .. " duel points"
+        if result == 1 then
             acct.duelWins = (acct.duelWins or 0) + 1
             acct.lossStreak = 0
-            xp, points = DUEL_WIN_XP, DUEL_POINTS.win
-            text = ("You won the jump duel against %s, %d - %d! (+%d XP, +%d duel points)"):format(opp, me, them, xp, points)
+            xp = DUEL_WIN_XP
+            text = ("You won the jump duel against %s, %d - %d! (+%d XP, %s)"):format(opp, me, them, xp, pts)
             short = "|cff33ff33You won!|r"
-        elseif me < them then
+        elseif result == 0 then
             acct.duelLosses = (acct.duelLosses or 0) + 1
-            acct.lossStreak = (acct.lossStreak or 0) + 1
-            points = DUEL_POINTS.loss
-            comeback = acct.lossStreak % DUEL_POINTS.comebackEvery == 0
-            text = ("%s won the jump duel, %d - %d. (+%d XP, +%d duel points for playing)"):format(opp, them, me, xp, points)
+            -- The shield resets the streak, so it comes again after 3 more.
+            acct.lossStreak = (change == 0 and note:find("shield")) and 0 or (acct.lossStreak or 0) + 1
+            text = ("%s won the jump duel, %d - %d. (+%d XP for playing, %s)"):format(opp, them, me, xp, pts)
             short = "Good fight!"
         else
             acct.duelDraws = (acct.duelDraws or 0) + 1
             acct.lossStreak = 0
-            points = DUEL_POINTS.draw
-            text = ("The jump duel against %s is a draw, %d - %d! (+%d XP, +%d duel points)"):format(opp, me, them, xp, points)
+            text = ("The jump duel against %s is a draw, %d - %d! (+%d XP, %s)"):format(opp, me, them, xp, pts)
             short = "Draw!"
         end
+        text = text .. note
         if not d.oppFinal then text = text .. " |cff999999(their last known score)|r" end
         acct.duelXP = (acct.duelXP or 0) + xp
-        acct.duelPoints = (acct.duelPoints or 0) + points
+        acct.duelPoints = myPoints + change
         dirty = true
         Notify(GOLD:format(text), true)
-        if comeback then
-            acct.duelPoints = acct.duelPoints + DUEL_POINTS.comeback
-            Notify(GOLD:format(("Tough luck! +%d bonus duel points for not giving up.")
-                :format(DUEL_POINTS.comeback)))
-        end
         local rankAfter = DuelRank(acct.duelPoints)
-        if rankAfter ~= rankBefore then
+        if acct.duelPoints > myPoints and rankAfter ~= rankBefore then
             Notify(GOLD:format(("Duel rank up: %s!"):format(rankAfter)), true)
+        elseif acct.duelPoints < myPoints and rankAfter ~= rankBefore then
+            Print(("Your duel rank is now %s."):format(rankAfter))
         end
         EndDuel(d, short)
         CheckChallenges()
@@ -3121,8 +3150,9 @@ local function BuildOverviewTab(page, width)
         { label = "Duel rank", get = function()
             local title, nextTitle, nextAt = DuelRank(acct.duelPoints)
             return ("%s |cff999999(%d wins)|r"):format(title, acct.duelWins or 0) end,
-          tip = "Duel points: a win +20, a draw +10, a loss +5 for playing - and every 3rd loss in a row "
-              .. "+15 extra. Points never go down." },
+          tip = "Duel points: win and you take points from your opponent, lose and they take yours - more "
+              .. "for beating someone stronger, less for losing to them. No losses below Contender, and "
+              .. "after 3 losses in a row the next one is free." },
         { label = "Prestige", get = function()
             local p = EntryPrestige(me)
             return p > 0 and (PrestigeTag(p)) or GRAY:format("at level " .. PRESTIGE_LEVEL) end },
@@ -3192,8 +3222,8 @@ local BOARD_COLUMNS = {
       tip = "Average jumps per hour of online time over the last 7 days (time flagged AFK doesn't count)." },
     { label = "Deaths",     width = 48,  justify = "RIGHT", sort = "deaths" },
     { label = "Duel rank",  width = 112, justify = "LEFT",  sort = "duels",
-      tip = "Duel rank and duel points: a win +20, a draw +10, a loss +5 for playing, "
-          .. "and every 3rd loss in a row +15 extra. Points never go down." },
+      tip = "Duel rank and duel points. Winning takes points from your opponent - more if they're "
+          .. "ranked higher - and losing gives them yours. No losses below Contender." },
     { label = "Wins",       width = 46,  justify = "RIGHT", sort = "wins", tip = "Jump duels won." },
 }
 
@@ -3441,7 +3471,7 @@ local function BuildLeaderboardTab(page, width)
                 or "weeks start Monday 00:00 UTC",
             rate = "average jumps per hour online, last 7 days (not AFK)",
             level = "XP = jumps + challenge, duel and crown rewards",
-            duels = "duel rank points: win +20, draw +10, loss +5",
+            duels = "duel points: win them from your opponent - more against stronger players",
             wins = "jump duels won",
         })[mode] or "click a column to sort - hover a player for details"
         self.footer:SetText(count .. "  -  " .. note)

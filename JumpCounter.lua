@@ -836,6 +836,14 @@ end
 --  * of two rows with the same full name, the older one is dropped.
 local function PruneStalePeers()
     local peers = JumpCounterDB.peers
+    -- Only rows without an account id (versions before 1.1.0) can be stale.
+    -- Almost everyone has one by now, so usually there's nothing to do -
+    -- and this runs for every score that arrives.
+    local any = false
+    for _, data in pairs(peers) do
+        if not data.acct then any = true break end
+    end
+    if not any then return end
     local covered = {}    -- full names / "first:" first names of known accounts
     local function cover(name)
         if not name or name == "" then return end
@@ -2154,18 +2162,24 @@ do
     local started = false
     local lastNews = -CROWN_NEWS_GAP
 
-    -- The leader this hour (a tie keeps the crown with whoever had it).
+    -- The leader this hour: key, jumps, class (a tie keeps the crown with
+    -- whoever had it). Runs every few seconds, so it just scans for the
+    -- highest count instead of building and sorting the whole leaderboard.
     local function Leader()
-        local list = BuildStandings("hour")
-        local top = list[1]
-        if not top or top.score < CROWN_MIN then return nil end
-        if holderKey and top.key ~= holderKey then
-            for _, e in ipairs(list) do
-                if e.score < top.score then break end
-                if e.key == holderKey then return e end
+        local hid = CurrentHourId()
+        local bestKey, bestCount, bestClass = nil, 0, nil
+        local function consider(key, count, class)
+            if count > bestCount or (count == bestCount and key == holderKey) then
+                bestKey, bestCount, bestClass = key, count, class
             end
         end
-        return top
+        consider(playerKey, (acct.hourId == hid) and (acct.hour or 0) or 0, charData.class)
+        local chars = JumpCounterDB.chars
+        for key, data in pairs(JumpCounterDB.peers) do
+            if data.hourId == hid and data.hour and not chars[key] then consider(key, data.hour, data.class) end
+        end
+        if bestCount < CROWN_MIN then return nil end
+        return bestKey, bestCount, bestClass
     end
 
     local function CrownNews(key, prev, class, count)
@@ -2201,15 +2215,14 @@ do
         end
         holderHour = hid
 
-        local e = Leader()
-        local key = e and e.key
+        local key, count, class = Leader()
         if key ~= holderKey then
             local prev = holderKey
             holderKey = key
             -- No news for whoever already had it when we logged in.
-            if key and started then CrownNews(key, prev, e.class, e.score) end
+            if key and started then CrownNews(key, prev, class, count) end
         end
-        if e then holderClass, holderCount = e.class, e.score end
+        if key then holderClass, holderCount = class, count end
         started = true
         if crownKey ~= key then
             crownKey = key

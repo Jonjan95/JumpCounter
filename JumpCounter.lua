@@ -2109,8 +2109,11 @@ do
     local DUEL_LENGTH = 60            -- 1.8.0: 1 minute (120 s in 1.7.x - the invite says which)
     local OLD_DUEL_LENGTH = 180       -- invites from 1.5.0 / 1.6.0
     local DUEL_LEAD = 15              -- seconds from invite to start (countdown)
-    local DUEL_COOLDOWN = 1800        -- at most one random duel per 30 minutes each
-    local DUEL_CHANCE = 1 / 90        -- chance per minute to start one (~every 1.5 h)
+    -- 1.8.2: cooldowns per opponent, so a bigger group gets more duels (with
+    -- different people) while two players still meet at most every 30 min.
+    local DUEL_COOLDOWN = 600         -- after any duel: 10 minutes before the next
+    local PAIR_COOLDOWN = 1800        -- the same two players: once per 30 minutes
+    local DUEL_CHANCE = 1 / 90        -- chance per minute to start one with a single opponent around
     local DUEL_ACTIVE = 300           -- opponents must have jumped in the last 5 min
     local DUEL_MIN_VERSION = "1.7.0"   -- older versions would count 3 minutes
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
@@ -2155,9 +2158,16 @@ do
         return math.max(0, DUEL_COOLDOWN - (now - (acct.lastDuelEnd or 0)))
     end
 
-    local function CanDuel(now)
+    -- Seconds until we may duel this opponent again (0 = now). Saved
+    -- account-wide in acct.duelPairs = { [their acct] = server time it ended }.
+    local function PairLeft(now, oppAcct)
+        local last = acct.duelPairs and oppAcct and acct.duelPairs[oppAcct]
+        return last and math.max(0, PAIR_COOLDOWN - (now - last)) or 0
+    end
+
+    local function CanDuel(now, oppAcct)
         return settings.duels and not duel and not Plain(UnitIsAFK("player")) and not CantJump()
-            and CooldownLeft(now) == 0
+            and CooldownLeft(now) == 0 and PairLeft(now, oppAcct) == 0
     end
 
     -- Players on 1.5.0+ who jumped recently and aren't in a duel.
@@ -2166,7 +2176,8 @@ do
         for key, data in pairs(JumpCounterDB.peers) do
             if data.acct and data.version and not IsNewerVersion(DUEL_MIN_VERSION, data.version)
                 and (data.hops or 0) == 0          -- heard directly, so we can reach them
-                and time() - (data.lastJumped or 0) <= DUEL_ACTIVE and (busyUntil[data.acct] or 0) < now then
+                and time() - (data.lastJumped or 0) <= DUEL_ACTIVE and (busyUntil[data.acct] or 0) < now
+                and PairLeft(now, data.acct) == 0 then
                 table.insert(list, { acct = data.acct, name = DisplayName(key), class = data.class })
             end
         end
@@ -2201,6 +2212,11 @@ do
         local now = GetServerTime()
         duel = nil
         acct.lastDuelEnd = now
+        acct.duelPairs = acct.duelPairs or {}
+        for a, t in pairs(acct.duelPairs) do
+            if now - t > PAIR_COOLDOWN then acct.duelPairs[a] = nil end
+        end
+        if d.opp and d.opp.acct then acct.duelPairs[d.opp.acct] = now end
         if duelFrame then
             duelFrame.title:SetText("Jump duel vs " .. ClassColored(d.opp.name, d.opp.class))
             duelFrame.score:SetText(("You %d  -  %d"):format(d.mine, d.theirs))
@@ -2216,7 +2232,9 @@ do
             -- Nothing ever arrived from them (disconnected?): no result.
             Print(("The jump duel against %s was cancelled - no score arrived from them."):format(opp))
             EndDuel(d, "Cancelled")
-            acct.lastDuelEnd = acct.lastDuelEnd - DUEL_COOLDOWN + 300   -- no result: try again soon
+            -- No result: no pair cooldown, and only 5 minutes before the next.
+            acct.lastDuelEnd = acct.lastDuelEnd - DUEL_COOLDOWN + 300
+            if acct.duelPairs then acct.duelPairs[d.opp.acct] = nil end
             return
         end
         local me, them = d.mine, d.theirs
@@ -2268,8 +2286,8 @@ do
         if d and d.state ~= "on" and now >= d.start then
             -- The invite was never confirmed.
             if d.manual and d.state == "invited" then
-                Print(("%s didn't accept the duel (busy, AFK, on a flight path, had a duel in the last "
-                    .. "30 minutes, or duels turned off)."):format(
+                Print(("%s didn't accept the duel (busy, AFK, on a flight path, dueled recently, "
+                    .. "or duels turned off)."):format(
                     ClassColored(d.opp.name, d.opp.class)))
             end
             duel = nil
@@ -2335,7 +2353,7 @@ do
             local length = tonumber(a7) or OLD_DUEL_LENGTH
             if length < 30 or length > 600 then return end
             if a5 ~= acct.id or a2 == acct.id or not start then return end
-            if not CanDuel(now) or start - now < 5 or start - now > 60 then return end
+            if not CanDuel(now, a2) or start - now < 5 or start - now > 60 then return end
             duel = { id = id, start = start, finish = start + length, state = "accepted",
                 opp = { acct = a2, name = a3, class = (a4 ~= "" and a4) or nil }, mine = 0, theirs = 0 }
             SendDuel("DA", id, acct.id)
@@ -2433,8 +2451,15 @@ do
     end
 
     -- Every minute, maybe start a random duel.
+    -- The more opponents are around, the likelier. Measured in the simulator
+    -- (players hopping on and off): with two of you about one duel per hour
+    -- each (as before), with 4 about one per 25 min, with 6 about one per 20.
     function MaybeStartRandomDuel()
-        if CanDuel(GetServerTime()) and math.random() < DUEL_CHANCE then TryStartDuel(false) end
+        local now = GetServerTime()
+        if not CanDuel(now) then return end
+        local n = #DuelCandidates(now)
+        local chance = (n == 1) and DUEL_CHANCE or math.min(5, n) / 30
+        if n > 0 and math.random() < chance then TryStartDuel(false) end
     end
 
     -- /jumps duel: challenge a random player who is jumping around right now.
@@ -2451,8 +2476,22 @@ do
             if opp then
                 Print(("Challenging %s to a jump duel..."):format(ClassColored(opp.name, opp.class)))
             else
-                Print("Nobody to duel right now - opponents need v" .. DUEL_MIN_VERSION
-                    .. " or newer and must have jumped in the last 5 minutes.")
+                -- Anyone left out only because we dueled them recently?
+                local now, waits = GetServerTime(), {}
+                for key, data in pairs(JumpCounterDB.peers) do
+                    local left = data.acct and PairLeft(now, data.acct) or 0
+                    if left > 0 and time() - (data.lastJumped or 0) <= DUEL_ACTIVE then
+                        table.insert(waits, ("%s (%d min)"):format(
+                            ClassColored(DisplayName(key), data.class), math.ceil(left / 60)))
+                    end
+                end
+                if #waits > 0 then
+                    Print("You dueled them recently - the same two players can duel once per 30 minutes: "
+                        .. table.concat(waits, ", ") .. ".")
+                else
+                    Print("Nobody to duel right now - opponents need v" .. DUEL_MIN_VERSION
+                        .. " or newer and must have jumped in the last 5 minutes.")
+                end
             end
         end
     end
@@ -3586,7 +3625,8 @@ local function BuildSettingsTab(page, width)
     Section("Duels, crown & sound")
     SettingCheck("duels", "Random jump duels",
         "Now and then you're paired with another player who is jumping around for a 1-minute "
-        .. "jump-off. Most jumps wins. At most one duel every 30 minutes (also with /jumps duel).")
+        .. "jump-off. Most jumps wins. At most one duel every 10 minutes, and the same two players "
+        .. "once per 30 minutes (also with /jumps duel). More players around means more duels.")
     SettingCheck("duelNews", "Other players' duel results",
         "A chat line with the result when two other players finish a jump duel.")
     SettingCheck("crownNews", "The crown",

@@ -78,8 +78,10 @@ JUMP DUELS
   Now and then two players who are jumping around get paired for a
   1-minute jump duel: a small window counts down and shows both scores,
   and whoever jumps most wins bonus XP. Everyone online with the addon
-  sees the result in chat. At most one duel every 30 minutes, also with
-  /jumps duel. Turn them off (or the results of others' duels) in Settings.
+  sees the result in chat. The more of you are jumping, the more often
+  duels happen: at most one every 10 minutes for you, and the same two
+  players once per 30 minutes (also with /jumps duel). Turn them off (or
+  the results of others' duels) in Settings.
   Both players need v1.7.0 or newer.
 
   DUEL RANKS: every duel gives duel points - a win +20, a draw +10 and

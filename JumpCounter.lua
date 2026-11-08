@@ -51,6 +51,14 @@ local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99JumpingCounter|r: " .. msg)
 end
 
+-- In combat (boss fights especially) the game hides some values from addons
+-- ("secret values"): testing, comparing or doing math on one is an error.
+-- Plain(v) gives nil for a hidden value, so it's treated as unknown.
+local function Plain(v)
+    if issecretvalue and issecretvalue(v) then return nil end
+    return v
+end
+
 -- "1.10.0" > "1.9.2"
 local function IsNewerVersion(a, b)
     local pa, pb = {}, {}
@@ -757,7 +765,7 @@ function ScoreMessage()
     local msg = table.concat({ "T", me.total, charData.class or "", VERSION,
         playerKey, charData.display or "", CurrentWeekId() or "", MyWeekCount(me),
         UnitGUID("player") or "", me.deaths,
-        UnitLevel("player") or 0, EntryXP(me), CountCompleted(me),
+        Plain(UnitLevel("player")) or 0, EntryXP(me), CountCompleted(me),
         jph and math.floor(jph + 0.5) or "", EntryPrestige(me), acct.id }, ":")
     -- 1.5.0: duels won, after the character list (older versions ignore it).
     -- 1.6.0: faction ("A" / "H") after that.
@@ -1685,18 +1693,14 @@ end
 local function TrackJump(inWater)
     local st = acct.stats
     local function inc(name) st[name] = (st[name] or 0) + 1 end
-    -- In combat the game hides some values from addons ("secret values");
-    -- using one is an error. Treat a hidden value as unknown instead.
-    local function plain(v)
-        if issecretvalue and issecretvalue(v) then return nil end
-        return v
-    end
+    local plain = Plain
 
     if plain(IsMounted()) then inc("mounted") end
     if inWater then inc("swim") end
     if plain(UnitIsGhost("player")) then inc("ghost") end
     if plain(UnitAffectingCombat("player")) then inc("combat") end
     local inInstance, instanceType = IsInInstance()
+    inInstance, instanceType = plain(inInstance), plain(instanceType)
     if inInstance and (instanceType == "party" or instanceType == "raid") then inc("instance") end
     if IsInGroup() and (plain(GetNumGroupMembers()) or 0) >= 5 then inc("group") end
     if inInstance and instanceType == "pvp" then inc("pvp") end
@@ -1804,7 +1808,7 @@ do
 
     -- manual = someone typed /jumps duel: skip the cooldown.
     local function CanDuel(now, manual)
-        return settings.duels and not duel and not UnitIsAFK("player") and not CantJump()
+        return settings.duels and not duel and not Plain(UnitIsAFK("player")) and not CantJump()
             and (manual or now - lastDuelEnd >= DUEL_COOLDOWN)
     end
 
@@ -2096,8 +2100,8 @@ local debugMode = false
 local jumpStartedAt               -- debug: when the last land jump left the ground
 local groundTracker = CreateFrame("Frame")
 groundTracker:SetScript("OnUpdate", function()
-    wasSwimming = IsSwimming() and true or false
-    local grounded = not (IsFalling() or wasSwimming or IsFlying() or UnitOnTaxi("player"))
+    wasSwimming = Plain(IsSwimming()) and true or false
+    local grounded = not (Plain(IsFalling()) or wasSwimming or Plain(IsFlying()) or Plain(UnitOnTaxi("player")))
     -- /jumps debug: report how long each jump was in the air.
     if debugMode and jumpStartedAt and grounded and not wasGrounded then
         Print(("debug: landed after %.2f s in the air"):format(GetTime() - jumpStartedAt))
@@ -2110,6 +2114,7 @@ end)
 local function IsBreathDraining()
     for i = 1, (MIRRORTIMER_NUMTIMERS or 3) do
         local timer, _, _, scale = GetMirrorTimerInfo(i)
+        timer, scale = Plain(timer), Plain(scale)
         if timer == "BREATH" and scale and scale < 0 then return true end
     end
     return false
@@ -2124,12 +2129,12 @@ end
 local function OnJump()
     if debugMode then
         Print(("debug: falling=%s swimming=%s grounded=%s breath=%s - %.2f s since last counted jump"):format(
-            tostring(IsFalling()), tostring(IsSwimming()), tostring(wasGrounded),
+            tostring(Plain(IsFalling())), tostring(Plain(IsSwimming())), tostring(wasGrounded),
             tostring(IsBreathDraining()), GetTime() - lastJumpTime))
     end
-    if UnitOnTaxi("player") or IsFlying() then return end
+    if Plain(UnitOnTaxi("player")) or Plain(IsFlying()) then return end
     local now = GetTime()
-    local inWater = wasSwimming or IsSwimming()
+    local inWater = wasSwimming or Plain(IsSwimming())
     if inWater then
         -- Pressing jump underwater just swims upward; only surface hops count.
         if IsUnderwater() then return end
@@ -2325,7 +2330,7 @@ local function ShowEntryTooltip(owner, entry)
         title and (" - " .. title) or ""), 1, 0.82, 0)
 
     local function line(label, value) GameTooltip:AddDoubleLine(label, value, 0.75, 0.75, 0.75, 1, 1, 1) end
-    local charLevel = isMe and UnitLevel("player") or data.charLevel
+    local charLevel = isMe and Plain(UnitLevel("player")) or data.charLevel
     if data.faction then line("Faction", FactionIcon(data.faction) .. FACTION_NAMES[data.faction]) end
     line("Character level", charLevel and tostring(charLevel) or "?")
     line("Total jumps", Fmt(entry.total))
@@ -3197,7 +3202,7 @@ events:SetScript("OnEvent", function(_, event, ...)
             local now = GetTime()
             local dt = math.min(now - lastTick, 30)
             lastTick = now
-            if not UnitIsAFK("player") then
+            if not Plain(UnitIsAFK("player")) then
                 local before = JumpsPerHour(Me())
                 charData.rate.seconds = charData.rate.seconds + dt
                 -- Share the rate once it first becomes available.

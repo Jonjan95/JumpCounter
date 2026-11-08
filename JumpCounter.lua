@@ -790,42 +790,82 @@ local function GetBNetGameAccounts()
 end
 
 -- Outgoing messages go through a queue so a burst (guild + many friends)
--- never exceeds the game's addon message limits. One message per tick.
-local SEND_INTERVAL = 0.2
-local sendQueue = {}
-local queuedKeys = {}     -- avoid queueing the same message to the same target twice
-local sendTicker
+-- never exceeds the game's addon message limit: a burst of about 10, then
+-- about 1 per second - anything over it is silently dropped by the game.
+-- 1.8.2: paced to that limit (SEND_BURST, then SEND_RATE per second), most
+-- important first (duels, then scores, then passed-along scores), and a
+-- message the game still refuses goes back to the front and is retried.
+local Enqueue, QueuedCount          -- the send queue (in a block: Lua 5.1's 200-local limit)
+do
+    local SEND_INTERVAL = 0.2
+    local SEND_BURST = 8
+    local SEND_RATE = 1
+    local sendQueue = {}
+    local queuedKeys = {}     -- avoid queueing the same message to the same target twice
+    local sendTicker
+    local sendTokens, sendTokensAt = SEND_BURST, 0
 
-local function ProcessQueue()
-    local item = table.remove(sendQueue, 1)
-    if item then
-        queuedKeys[item.id] = nil
-        if item.bnet then
-            pcall(BNSendGameData, item.target, PREFIX, item.msg)
-        else
-            C_ChatInfo.SendAddonMessage(PREFIX, item.msg, item.channel, item.target)
+    local function ProcessQueue()
+        local now = GetTime()
+        sendTokens = math.min(SEND_BURST, sendTokens + (now - sendTokensAt) * SEND_RATE)
+        sendTokensAt = now
+        if sendTokens >= 1 and sendQueue[1] then
+            local item = table.remove(sendQueue, 1)
+            queuedKeys[item.id] = nil
+            sendTokens = sendTokens - 1
+            local throttled = false
+            if item.bnet then
+                pcall(BNSendGameData, item.target, PREFIX, item.msg)
+            else
+                local result = C_ChatInfo.SendAddonMessage(PREFIX, item.msg, item.channel, item.target)
+                local THROTTLED = Enum and Enum.SendAddonMessageResult
+                    and Enum.SendAddonMessageResult.AddonMessageThrottle
+                throttled = THROTTLED ~= nil and result == THROTTLED
+            end
+            if throttled and (item.tries or 0) < 5 then
+                -- The game says "too fast": wait a moment and try again.
+                item.tries = (item.tries or 0) + 1
+                table.insert(sendQueue, 1, item)
+                queuedKeys[item.id] = true
+                sendTokens = 0
+            end
+        end
+        if #sendQueue == 0 and sendTicker then
+            sendTicker:Cancel()
+            sendTicker = nil
         end
     end
-    if #sendQueue == 0 and sendTicker then
-        sendTicker:Cancel()
-        sendTicker = nil
-    end
-end
 
-local function Enqueue(msg, channel, target, bnet)
-    -- Relayed scores ("R:<acct>:...") are one message per account.
-    local kind = msg:match("^(R:[^:]+)") or msg:match("^[^:]+") or msg
-    local id = (bnet and "bn" or channel) .. ":" .. tostring(target) .. ":" .. kind
-    if queuedKeys[id] then
-        -- Already waiting to go out: just send the newest content.
-        for _, item in ipairs(sendQueue) do
-            if item.id == id then item.msg = msg end
-        end
-        return
+    -- 1 = duel messages (time-critical), 2 = scores and requests, 3 = passed-along scores.
+    local function SendPriority(msg)
+        local tag = msg:match("^[^:]+")
+        if tag == "R" then return 3 end
+        if tag and tag:match("^D[QAGPF]$") then return 1 end
+        return 2
     end
-    queuedKeys[id] = true
-    table.insert(sendQueue, { id = id, msg = msg, channel = channel, target = target, bnet = bnet })
-    if not sendTicker then sendTicker = C_Timer.NewTicker(SEND_INTERVAL, ProcessQueue) end
+
+    function Enqueue(msg, channel, target, bnet)
+        -- Relayed scores ("R:<acct>:...") are one message per account.
+        local kind = msg:match("^(R:[^:]+)") or msg:match("^[^:]+") or msg
+        local id = (bnet and "bn" or channel) .. ":" .. tostring(target) .. ":" .. kind
+        if queuedKeys[id] then
+            -- Already waiting to go out: just send the newest content.
+            for _, item in ipairs(sendQueue) do
+                if item.id == id then item.msg = msg end
+            end
+            return
+        end
+        queuedKeys[id] = true
+        local item = { id = id, msg = msg, channel = channel, target = target, bnet = bnet, prio = SendPriority(msg) }
+        -- After everything at least as important, before anything less important.
+        local pos = #sendQueue + 1
+        for i, other in ipairs(sendQueue) do
+            if other.prio > item.prio then pos = i break end
+        end
+        table.insert(sendQueue, pos, item)
+        if not sendTicker then sendTicker = C_Timer.NewTicker(SEND_INTERVAL, ProcessQueue) end
+    end
+    function QueuedCount() return #sendQueue end
 end
 
 local function SendBNet(gameAccountID, msg)
@@ -3976,7 +4016,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
             Print("Name sources: " .. table.concat(names, ", ") .. " - saved: " .. tostring(charData.display)
                 .. (charData.nameSetByHand and " (set by hand)" or ""))
             Print(("Friends confirmed using JumpingCounter: whisper=%d, Battle.net=%d. Queued messages: %d")
-                :format(nWhisper, nBNet, #sendQueue))
+                :format(nWhisper, nBNet, QueuedCount()))
         end
     elseif cmd == "version" then
         -- Your version, plus who on the leaderboard is on an older one.

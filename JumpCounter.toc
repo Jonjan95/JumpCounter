@@ -1,8 +1,8 @@
 ## Interface: 16001
-## Title: JumpingCounter |cff999999v1.8.2|r
+## Title: JumpingCounter |cff999999v1.8.3|r
 ## Notes: Counts your jumps and deaths and shares them with friends on a leaderboard.
 ## Author: Jonis
-## Version: 1.8.2
+## Version: 1.8.3
 ## IconTexture: Interface\Icons\Ability_Rogue_Sprint
 ## SavedVariables: JumpCounterDB
 ## AddonCompartmentFunc: JumpCounter_OnAddonCompartmentClick

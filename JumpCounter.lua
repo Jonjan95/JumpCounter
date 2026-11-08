@@ -2623,120 +2623,385 @@ local function ShowEntryTooltip(owner, entry)
 end
 
 ---------------------------------------------------------------------------
--- Leaderboard tab
+-- WoW-style building blocks. Blizzard's own templates make the window look
+-- like part of the game. Forever may not have every template, so check
+-- first and fall back to a plain look rather than breaking.
 ---------------------------------------------------------------------------
-local BOARD_CATEGORIES = {
-    { mode = "all",    label = "All time" },
-    { mode = "hour",   label = "This hour" },
-    { mode = "week",   label = "This week" },
-    { mode = "rate",   label = "Per hour" },
-    { mode = "level",  label = "Level" },
-    { mode = "deaths", label = "Deaths" },
+local function HasTemplate(t)
+    if C_XMLUtil and C_XMLUtil.GetTemplateInfo then
+        local ok, info = pcall(C_XMLUtil.GetTemplateInfo, t)
+        return ok and info ~= nil
+    end
+    return true   -- can't tell: callers check for the parts they use
+end
+
+-- A thin divider line.
+local function Divider(parent, alpha)
+    local t = parent:CreateTexture(nil, "ARTWORK")
+    t:SetColorTexture(1, 0.82, 0, alpha or 0.25)
+    t:SetHeight(1)
+    return t
+end
+
+-- A section title like the Character window's ("Attributes"): gold text
+-- with a faint line under it.
+local function SectionTitle(parent, text)
+    local s = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    s:SetText(text)
+    local line = Divider(parent, 0.3)
+    line:SetPoint("TOPLEFT", s, "BOTTOMLEFT", 0, -3)
+    s.line = line
+    return s
+end
+
+-- The list highlight Blizzard uses for quest log / who list rows.
+local function RowHighlight(button)
+    local hl = button:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+    hl:SetBlendMode("ADD")
+    hl:SetAllPoints()
+    hl:SetAlpha(0.5)
+    return hl
+end
+
+---------------------------------------------------------------------------
+-- Overview tab: your "character sheet" - level, rank, XP and your numbers.
+---------------------------------------------------------------------------
+local function BuildOverviewTab(page, width)
+    local nameText = page:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    nameText:SetPoint("TOPLEFT", 4, -6)
+    local levelText = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    levelText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -5)
+    local nextRankText = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    nextRankText:SetPoint("TOPRIGHT", -4, -8)
+    nextRankText:SetJustifyH("RIGHT")
+
+    -- XP bar, styled like the game's experience bar.
+    local xpBar = CreateFrame("StatusBar", nil, page)
+    xpBar:SetHeight(16)
+    xpBar:SetPoint("TOPLEFT", 4, -54)
+    xpBar:SetPoint("TOPRIGHT", -126, -54)
+    xpBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    xpBar:SetStatusBarColor(0.58, 0.0, 0.55)
+    local xpBg = xpBar:CreateTexture(nil, "BACKGROUND")
+    xpBg:SetAllPoints()
+    xpBg:SetColorTexture(0, 0, 0, 0.6)
+    for _, side in ipairs({ { "TOPLEFT", "TOPRIGHT" }, { "BOTTOMLEFT", "BOTTOMRIGHT" } }) do
+        local edge = xpBar:CreateTexture(nil, "OVERLAY")
+        edge:SetColorTexture(0.6, 0.5, 0.3, 0.8)
+        edge:SetHeight(1)
+        edge:SetPoint(side[1], -1, side[1]:find("TOP") and 1 or -1)
+        edge:SetPoint(side[2], 1, side[2]:find("TOP") and 1 or -1)
+    end
+    xpBar.text = xpBar:CreateFontString(nil, "OVERLAY", "TextStatusBarText")
+    xpBar.text:SetPoint("CENTER", 0, 1)
+
+    local prestigeButton = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
+    prestigeButton:SetSize(112, 22)
+    prestigeButton:SetPoint("TOPRIGHT", -4, -51)
+    prestigeButton:SetText("Prestige!")
+    prestigeButton:SetScript("OnClick", function() AskPrestige() end)
+    prestigeButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Prestige")
+        GameTooltip:AddLine("Reset your jump level to 1 and earn a prestige star. "
+            .. "Total jumps, ranks, total XP and challenges are kept.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    prestigeButton:SetScript("OnLeave", GameTooltip_Hide)
+    local prestigeInfo = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    prestigeInfo:SetPoint("TOPRIGHT", -4, -56)
+    prestigeInfo:SetWidth(118)
+    prestigeInfo:SetJustifyH("RIGHT")
+
+    -- Two columns of stat rows, like the Character window's stats.
+    local colW = math.floor((width - 24) / 2)
+    local ROW_H = 20
+    local function Column(x, title, defs)
+        local head = SectionTitle(page, title)
+        head:SetPoint("TOPLEFT", x, -92)
+        head.line:SetWidth(colW)
+        local rows = {}
+        for i, d in ipairs(defs) do
+            local r = CreateFrame("Frame", nil, page)
+            r:SetSize(colW, ROW_H)
+            r:SetPoint("TOPLEFT", x, -110 - (i - 1) * ROW_H)
+            if i % 2 == 1 then
+                local bg = r:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints()
+                bg:SetColorTexture(1, 1, 1, 0.05)
+            end
+            r.label = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            r.label:SetPoint("LEFT", 8, 0)
+            r.label:SetText(d.label)
+            r.value = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            r.value:SetPoint("RIGHT", -8, 0)
+            if d.tip then
+                r:EnableMouse(true)
+                r:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(d.label)
+                    GameTooltip:AddLine(d.tip, 1, 1, 1, true)
+                    GameTooltip:Show()
+                end)
+                r:SetScript("OnLeave", GameTooltip_Hide)
+            end
+            r.get = d.get
+            rows[i] = r
+        end
+        return rows
+    end
+
+    local me, standings, myPos
+    local left = Column(4, "Jumps", {
+        { label = "Total jumps", get = function() return Fmt(me.total) end },
+        { label = "This session", get = function() return Fmt(sessionJumps) end },
+        { label = "This hour", get = function()
+            return (crownKey == playerKey and CROWN_ICON or "") .. Fmt(HourCount(me)) end,
+          tip = "Your jumps since the hour started. Whoever has the most holds the crown." },
+        { label = "This week", get = function()
+            local secs = SecondsUntilReset()
+            return Fmt(MyWeekCount(me)) .. (secs and GRAY:format(" (resets in " .. FormatDuration(secs) .. ")") or "")
+          end },
+        { label = "Per hour", get = function()
+            local jph = JumpsPerHour(me)
+            return jph and Fmt(jph) or GRAY:format(("%d / 30 min online"):format(math.floor(me.rate.seconds / 60)))
+          end,
+          tip = "Jumps per hour of online time over the last 7 days (time flagged AFK doesn't count)." },
+        { label = "Best minute", get = function() return Fmt(acct.stats.bestMinute or 0) end },
+        { label = "Deaths", get = function() return Fmt(me.deaths) end },
+        { label = "Jumps since last death", get = function() return Fmt(acct.stats.sinceDeath or 0) end },
+    })
+    local right = Column(colW + 20, "Progress", {
+        { label = "Leaderboard", get = function()
+            return myPos and ("#%d of %d"):format(myPos, #standings) or "-" end },
+        { label = "Total XP", get = function() return Fmt(EntryXP(me)) end },
+        { label = "Challenges", get = function()
+            return ("%d / %d"):format(CountCompleted(acct), #CHALLENGES) end },
+        { label = "Crowns won", get = function() return Fmt(acct.crowns or 0) end,
+          tip = "Hours you finished with the most jumps of everyone you can see." },
+        { label = "Jump duels", get = function()
+            return ("%d won, %d lost, %d draws"):format(acct.duelWins or 0, acct.duelLosses or 0, acct.duelDraws or 0) end },
+        { label = "Prestige", get = function()
+            local p = EntryPrestige(me)
+            return p > 0 and (PrestigeTag(p)) or GRAY:format("at level " .. PRESTIGE_LEVEL) end },
+        { label = "Characters", get = function() return tostring(CountKeys(JumpCounterDB.chars)) end },
+        { label = "Best day streak", get = function()
+            local n = acct.stats.bestStreak or 0
+            return n .. (n == 1 and " day" or " days") end },
+    })
+
+    local hint = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("BOTTOMLEFT", 4, 4)
+    hint:SetPoint("BOTTOMRIGHT", -4, 4)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("Every jump on any of your characters gives 1 XP; challenges, duels and crowns give more.")
+
+    function page:Refresh()
+        me = Me()
+        standings = BuildStandings("all")
+        myPos = MyRank()
+        local prestige = EntryPrestige(me)
+        nameText:SetText(PrestigeTag(prestige) .. FactionIcon(MyFaction()) .. ColoredName(playerKey, charData.class))
+        local level, into, need = EntryLevel(me)
+        local rankTitle = GetJumpRank(me.total)
+        levelText:SetText(("Jump level |cffffffff%d|r  %s"):format(level,
+            rankTitle and ("|cffffd100" .. rankTitle .. "|r") or GRAY:format("no rank yet")))
+        local nextTitle, nextAt = NextJumpRank(me.total)
+        nextRankText:SetText(nextTitle
+            and ("Next rank: |cffffd100%s|r\n%s jumps to go"):format(nextTitle, Fmt(nextAt - me.total))
+            or "Highest rank reached!")
+        xpBar:SetMinMaxValues(0, need)
+        xpBar:SetValue(into)
+        xpBar.text:SetText(("XP %s / %s"):format(Fmt(into), Fmt(need)))
+        if CanPrestige() then
+            prestigeButton:Show()
+            prestigeInfo:Hide()
+        else
+            prestigeButton:Hide()
+            prestigeInfo:Show()
+            prestigeInfo:SetText(("Prestige at level %d"):format(PRESTIGE_LEVEL))
+        end
+        for _, r in ipairs(left) do r.value:SetText(r.get()) end
+        for _, r in ipairs(right) do r.value:SetText(r.get()) end
+    end
+end
+
+---------------------------------------------------------------------------
+-- Leaderboard tab: a table like the Guild / Who list. Click a column
+-- header to sort by it.
+---------------------------------------------------------------------------
+local BOARD_COLUMNS = {
+    { label = "#",        width = 30,  justify = "RIGHT" },
+    { label = "Player",   width = 178, justify = "LEFT" },
+    { label = "Level",    width = 64,  justify = "LEFT",  sort = "level",
+      tip = "Jump level (and prestige stars). Sorts by total XP." },
+    { label = "Jumps",    width = 72,  justify = "RIGHT", sort = "all",    tip = "All-time jumps." },
+    { label = "Hour",     width = 54,  justify = "RIGHT", sort = "hour",
+      tip = "Jumps this hour. The most holds the crown." },
+    { label = "Week",     width = 64,  justify = "RIGHT", sort = "week",   tip = "Jumps this week." },
+    { label = "Per hour", width = 66,  justify = "RIGHT", sort = "rate",
+      tip = "Jumps per hour of online time, last 7 days." },
+    { label = "Deaths",   width = 58,  justify = "RIGHT", sort = "deaths" },
 }
+
+-- Everyone on the board with every column's value, sorted by one of them.
+-- Players without a value for that column (older versions) go last.
+local function BuildTable(sort)
+    local wid = CurrentWeekId()
+    local rows = {}
+    local function add(key, data, mine)
+        table.insert(rows, { key = key, data = data, class = data.class, total = data.total or 0, mine = mine,
+            all = data.total or 0, hour = HourCount(data),
+            week = (wid and data.weekId == wid) and (data.week or 0) or 0,
+            rate = JumpsPerHour(data), level = EntryXP(data), deaths = data.deaths })
+    end
+    add(playerKey, Me(), true)
+    local byName = {}
+    for key, data in pairs(JumpCounterDB.peers) do
+        if not JumpCounterDB.chars[key] then
+            local name = data.acct and ("#" .. data.acct) or DisplayName(key):lower()
+            local best = byName[name]
+            if not best or (data.seen or 0) > (best.data.seen or 0) then byName[name] = { key = key, data = data } end
+        end
+    end
+    for _, e in pairs(byName) do add(e.key, e.data) end
+    table.sort(rows, function(a, b)
+        local x, y = a[sort], b[sort]
+        if x ~= nil and y ~= nil and x ~= y then return x > y end
+        if (x == nil) ~= (y == nil) then return x ~= nil end
+        if a.total ~= b.total then return a.total > b.total end
+        return a.key < b.key
+    end)
+    return rows
+end
 
 local function BuildLeaderboardTab(page, width)
     local ROW_H = 18
     local ROWS = BOARD_ROWS
-    local listTop = -30
+    local HEAD_H = 22
+    local listTop = -HEAD_H - 4
     local listHeight = ROWS * ROW_H
 
-    local cats = {}
-    local catWidth = math.floor((width - 4 * (#BOARD_CATEGORIES - 1)) / #BOARD_CATEGORIES)
-    for i, c in ipairs(BOARD_CATEGORIES) do
-        local b = FlatButton(page, catWidth, 20, c.label)
-        b:SetPoint("TOPLEFT", (i - 1) * (catWidth + 4), 0)
-        b:SetScript("OnClick", function()
-            JumpCounterDB.ui.boardMode = c.mode
-            page.scrollOffsetReset = true
-            page:Refresh()
-        end)
-        cats[c.mode] = b
+    -- Column headers (clickable for sorting).
+    local headers = {}
+    local x = 0
+    for i, col in ipairs(BOARD_COLUMNS) do
+        local h = CreateFrame("Button", nil, page)
+        h:SetSize(col.width - 2, HEAD_H)
+        h:SetPoint("TOPLEFT", x, 0)
+        local bg = h:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.25, 0.2, 0.1, 0.55)
+        h.bg = bg
+        local hl = h:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 0.82, 0, 0.15)
+        h.text = h:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        h.text:SetPoint("LEFT", 5, 0)
+        h.text:SetPoint("RIGHT", -5, 0)
+        h.text:SetJustifyH(col.justify)
+        h.text:SetText(col.label)
+        h.line = h:CreateTexture(nil, "ARTWORK")
+        h.line:SetColorTexture(1, 0.82, 0, 1)
+        h.line:SetHeight(2)
+        h.line:SetPoint("BOTTOMLEFT")
+        h.line:SetPoint("BOTTOMRIGHT")
+        if col.sort then
+            h:SetScript("OnClick", function()
+                JumpCounterDB.ui.boardMode = col.sort
+                page.scrollOffsetReset = true
+                page:Refresh()
+                if SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON then
+                    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+                end
+            end)
+            h:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine(col.label)
+                if col.tip then GameTooltip:AddLine(col.tip, 1, 1, 1, true) end
+                GameTooltip:AddLine("Click to sort by this column.", 0.6, 0.6, 0.6)
+                GameTooltip:Show()
+            end)
+            h:SetScript("OnLeave", GameTooltip_Hide)
+        else
+            h:EnableMouse(false)
+        end
+        h.col = col
+        headers[i] = h
+        x = x + col.width
     end
 
-    -- Column headers.
-    local function Header(text, point, x, justify)
-        local h = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        h:SetPoint(point, x, -24 + 0)
-        h:SetJustifyH(justify)
-        h:SetText(text)
-        return h
+    local function Cell(row, i, xOff, y, font)
+        local col = BOARD_COLUMNS[i]
+        local fs = page:CreateFontString(nil, "OVERLAY", font or "GameFontHighlightSmall")
+        fs:SetPoint("TOPLEFT", xOff + 5, y)
+        fs:SetWidth(col.width - 10)
+        fs:SetJustifyH(col.justify)
+        fs:SetWordWrap(false)
+        return fs
     end
-    Header("#", "TOPLEFT", 14, "RIGHT")
-    Header("Player", "TOPLEFT", 48, "LEFT")
-    Header("Level & rank", "TOPLEFT", 222, "LEFT")
-    local scoreHeader = Header("Jumps", "TOPRIGHT", -30, "RIGHT")
 
     local function MakeRow(y)
-        local row = {}
+        local row = { cells = {} }
         row.hover = CreateFrame("Button", nil, page)
-        row.hover:SetPoint("TOPLEFT", 0, y + 2)
-        row.hover:SetPoint("TOPRIGHT", -24, y + 2)
+        row.hover:SetPoint("TOPLEFT", 0, y + 3)
+        row.hover:SetPoint("TOPRIGHT", -24, y + 3)
         row.hover:SetHeight(ROW_H)
-        local hl = row.hover:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.08)
+        RowHighlight(row.hover)
         row.bg = row.hover:CreateTexture(nil, "BACKGROUND")
         row.bg:SetAllPoints()
-
-        row.rank = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        row.rank:SetPoint("TOPLEFT", 0, y)
-        row.rank:SetWidth(30)
-        row.rank:SetJustifyH("RIGHT")
-        row.name = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        row.name:SetPoint("TOPLEFT", 48, y)
-        row.name:SetWidth(168)
-        row.name:SetWordWrap(false)
-        row.name:SetJustifyH("LEFT")
-        row.level = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.level:SetPoint("TOPLEFT", 222, y - 1)
-        row.level:SetWidth(width - 222 - 110)
-        row.level:SetWordWrap(false)
-        row.level:SetJustifyH("LEFT")
-        row.score = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        row.score:SetPoint("TOPRIGHT", -30, y)
-        row.score:SetJustifyH("RIGHT")
-
+        local xOff = 0
+        for i, col in ipairs(BOARD_COLUMNS) do
+            row.cells[i] = Cell(row, i, xOff, y, i == 2 and "GameFontHighlight" or "GameFontHighlightSmall")
+            xOff = xOff + col.width
+        end
         row.hover:SetScript("OnEnter", function(self)
             if row.entry then ShowEntryTooltip(self, row.entry) end
         end)
         row.hover:SetScript("OnLeave", GameTooltip_Hide)
 
-        function row:Set(pos, entry, mode)
+        function row:Set(pos, entry, sort, stripe)
             row.entry = entry
             row.hover:SetShown(entry ~= nil)
             if not entry then
-                row.rank:SetText(""); row.name:SetText(""); row.level:SetText(""); row.score:SetText("")
+                for _, c in ipairs(row.cells) do c:SetText("") end
                 return
             end
-            local isMe = entry.key == playerKey
-            row.bg:SetColorTexture(1, 0.82, 0, isMe and 0.12 or 0)
-            row.rank:SetText(pos and (pos .. ".") or "")
-            row.name:SetText(FactionIcon((entry.data or {}).faction)
-                .. (entry.key == crownKey and CROWN_ICON or "") .. ColoredName(entry.key, entry.class))
             local data = entry.data or {}
-            local rankTitle = GetJumpRank(entry.total)
-            row.level:SetText(("%sLv %d %s"):format(PrestigeTag(EntryPrestige(data)), (EntryLevel(data)),
-                GRAY:format(rankTitle or "")))
-            if mode == "level" then
-                row.score:SetText(Fmt(entry.score) .. " XP")
-            elseif mode == "rate" then
-                local jph = JumpsPerHour(data)
-                row.score:SetText(jph and (Fmt(jph) .. "/h") or "-")
+            if entry.key == playerKey then
+                row.bg:SetColorTexture(1, 0.82, 0, 0.14)
             else
-                row.score:SetText(Fmt(entry.score))
+                row.bg:SetColorTexture(1, 1, 1, stripe and 0.04 or 0)
             end
+            local function num(v, key)
+                if v == nil then return GRAY:format("-") end
+                local s = (v == 0) and GRAY:format("0") or Fmt(v)
+                return (key == sort or v == 0) and s or ("|cffc8c8c8" .. s .. "|r")
+            end
+            local c = row.cells
+            c[1]:SetText(pos and GRAY:format(pos .. ".") or "")
+            c[2]:SetText(FactionIcon(data.faction)
+                .. (entry.key == crownKey and CROWN_ICON or "") .. ColoredName(entry.key, entry.class))
+            c[3]:SetText(PrestigeTag(EntryPrestige(data)) .. ((sort == "level") and "" or "|cffc8c8c8")
+                .. (EntryLevel(data)) .. ((sort == "level") and "" or "|r"))
+            c[4]:SetText(num(entry.all, "all"))
+            c[5]:SetText(num(entry.hour, "hour"))
+            c[6]:SetText(num(entry.week, "week"))
+            c[7]:SetText(entry.rate and num(entry.rate, "rate") or GRAY:format("-"))
+            c[8]:SetText(num(entry.deaths, "deaths"))
         end
         return row
     end
 
     page.rows = {}
     for i = 1, ROWS do
-        page.rows[i] = MakeRow(listTop - 10 - (i - 1) * ROW_H)
+        page.rows[i] = MakeRow(listTop - 4 - (i - 1) * ROW_H)
     end
 
     local scroll = CreateFrame("ScrollFrame", "JumpCounterMainBoardScroll", page, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 0, listTop - 8)
-    scroll:SetPoint("BOTTOMRIGHT", page, "TOPRIGHT", -24, listTop - 8 - listHeight)
+    scroll:SetPoint("TOPLEFT", 0, listTop)
+    scroll:SetPoint("BOTTOMRIGHT", page, "TOPRIGHT", -24, listTop - listHeight)
     scroll:SetScript("OnVerticalScroll", function(self, offset)
         FauxScrollFrame_OnVerticalScroll(self, offset, ROW_H, function() page:Update() end)
     end)
@@ -2749,27 +3014,25 @@ local function BuildLeaderboardTab(page, width)
         end)
     end
 
-    -- Your own row, always visible under the list.
-    local divider = page:CreateTexture(nil, "ARTWORK")
+    -- Your own row, pinned under the list when it's scrolled out of view.
+    local divider = Divider(page, 0.4)
     page.divider = divider
-    divider:SetColorTexture(1, 1, 1, 0.15)
-    divider:SetHeight(1)
-    divider:SetPoint("TOPLEFT", 0, listTop - 12 - listHeight)
-    divider:SetPoint("TOPRIGHT", -24, listTop - 12 - listHeight)
-    page.meRow = MakeRow(listTop - 18 - listHeight)
+    divider:SetPoint("TOPLEFT", 0, listTop - 6 - listHeight)
+    divider:SetPoint("TOPRIGHT", -24, listTop - 6 - listHeight)
+    page.meRow = MakeRow(listTop - 12 - listHeight)
 
     page.footer = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    page.footer:SetPoint("BOTTOMLEFT", 0, 0)
+    page.footer:SetPoint("BOTTOMLEFT", 2, 2)
+    page.footer:SetPoint("BOTTOMRIGHT", -2, 2)
+    page.footer:SetJustifyH("LEFT")
 
     function page:Update()
         local list = self.list or {}
         FauxScrollFrame_Update(scroll, #list, ROWS, ROW_H)
         local offset = FauxScrollFrame_GetOffset(scroll)
         for i, row in ipairs(self.rows) do
-            row:Set(i + offset, list[i + offset], self.mode)
+            row:Set(i + offset, list[i + offset], self.mode, (i + offset) % 2 == 0)
         end
-
-        -- Pinned "you" row: only when your own row is scrolled out of view.
         local pos = self.myPos
         local visible = pos and pos > offset and pos <= offset + ROWS
         local showPinned = pos ~= nil and not visible
@@ -2779,17 +3042,21 @@ local function BuildLeaderboardTab(page, width)
 
     function page:Refresh()
         local mode = JumpCounterDB.ui.boardMode or "all"
+        local valid = false
+        for _, col in ipairs(BOARD_COLUMNS) do if col.sort == mode then valid = true end end
+        if not valid then mode = "all" end
         self.mode = mode
-        for m, b in pairs(cats) do b:SetSelected(m == mode) end
-        scoreHeader:SetText(({ all = "Jumps", hour = "This hour", week = "This week", rate = "Per hour",
-            level = "Total XP", deaths = "Deaths" })[mode] or "")
-
+        for _, h in ipairs(headers) do
+            local on = h.col.sort == mode
+            h.line:SetShown(on)
+            h.text:SetTextColor(on and 1 or 0.85, on and 0.82 or 0.85, on and 0 or 0.85)
+        end
         if self.scrollOffsetReset then
             self.scrollOffsetReset = nil
             FauxScrollFrame_SetOffset(scroll, 0)
             if bar then bar:SetValue(0) end
         end
-        self.list = BuildStandings(mode)
+        self.list = BuildTable(mode)
         self.myPos, self.myEntry = nil, nil
         for i, entry in ipairs(self.list) do
             if entry.key == playerKey then self.myPos, self.myEntry = i, entry break end
@@ -2798,28 +3065,38 @@ local function BuildLeaderboardTab(page, width)
 
         local count = #self.list .. (#self.list == 1 and " player" or " players")
         local note = ({
+            hour = ("crown to the most jumps this hour - %d min left"):format(
+                math.ceil((3600 - GetServerTime() % 3600) / 60)),
             week = SecondsUntilReset() and ("week resets in " .. FormatDuration(SecondsUntilReset()))
                 or "weeks start Monday 00:00 UTC",
-            hour = ("most jumps this hour wins the crown - %d min left"):format(
-                math.ceil((3600 - GetServerTime() % 3600) / 60)),
-            rate = "last 7 days of online time, not AFK - after 30 min",
-            level = "XP = jumps + challenge rewards",
-            deaths = "deaths counted since v0.7.0",
-        })[mode] or "syncs with guild, group & friends - hover a player for details"
+            rate = "last 7 days of online time, not AFK",
+            level = "XP = jumps + challenge, duel and crown rewards",
+        })[mode] or "click a column to sort - hover a player for details"
         self.footer:SetText(count .. "  -  " .. note)
     end
 end
 
 ---------------------------------------------------------------------------
--- Challenges tab
+-- Challenges tab: rows like the Achievements window.
 ---------------------------------------------------------------------------
 local function BuildChallengesTab(page, width)
-    local ROW_H = 44
-    local summary = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    summary:SetPoint("TOPLEFT", 0, -2)
+    local ROW_H = 50
+    local summary = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    summary:SetPoint("TOPLEFT", 4, -4)
+
+    local hide = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
+    hide:SetSize(22, 22)
+    hide:SetPoint("TOPRIGHT", -120, 0)
+    local hideText = hide:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    hideText:SetPoint("LEFT", hide, "RIGHT", 2, 1)
+    hideText:SetText("Hide completed")
+    hide:SetScript("OnClick", function(self)
+        JumpCounterDB.ui.hideDone = self:GetChecked() and true or false
+        page:Refresh()
+    end)
 
     local scroll = CreateFrame("ScrollFrame", "JumpCounterMainChallengeScroll", page, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 0, -20)
+    scroll:SetPoint("TOPLEFT", 0, -26)
     scroll:SetPoint("BOTTOMRIGHT", -24, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(width - 28, #CHALLENGES * ROW_H)
@@ -2828,30 +3105,50 @@ local function BuildChallengesTab(page, width)
     local rows = {}
     for i, c in ipairs(CHALLENGES) do
         local r = CreateFrame("Frame", nil, content)
-        r:SetSize(width - 32, ROW_H - 4)
-        local bg = r:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(1, 1, 1, 0.04)
+        r:SetSize(width - 30, ROW_H - 4)
+        r.bg = r:CreateTexture(nil, "BACKGROUND")
+        r.bg:SetAllPoints()
+        r.border = r:CreateTexture(nil, "BORDER")
+        r.border:SetPoint("TOPLEFT")
+        r.border:SetPoint("BOTTOMLEFT")
+        r.border:SetWidth(3)
+        r.icon = r:CreateTexture(nil, "ARTWORK")
+        r.icon:SetSize(36, 36)
+        r.icon:SetPoint("LEFT", 8, 0)
+        r.icon:SetTexture(MINIMAP_ICON)
+        r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        r.check = r:CreateTexture(nil, "OVERLAY")
+        r.check:SetSize(16, 16)
+        r.check:SetPoint("BOTTOMRIGHT", r.icon, "BOTTOMRIGHT", 4, -4)
+        r.check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
         r.name = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        r.name:SetPoint("TOPLEFT", 6, -4)
+        r.name:SetPoint("TOPLEFT", r.icon, "TOPRIGHT", 10, 0)
         r.reward = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.reward:SetPoint("TOPRIGHT", -6, -5)
+        r.reward:SetPoint("TOPRIGHT", -8, -6)
         r.desc = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.desc:SetPoint("TOPLEFT", 6, -18)
+        r.desc:SetPoint("TOPLEFT", r.name, "BOTTOMLEFT", 0, -3)
         r.desc:SetText(c.desc)
-        r.bar = ProgressBar(r, 8, 1, 0.7, 0)
-        r.bar:SetPoint("BOTTOMLEFT", 6, 4)
-        r.bar:SetPoint("BOTTOMRIGHT", -150, 4)
+        r.bar = CreateFrame("StatusBar", nil, r)
+        r.bar:SetHeight(12)
+        r.bar:SetPoint("BOTTOMLEFT", r.icon, "BOTTOMRIGHT", 10, 0)
+        r.bar:SetWidth(220)
+        r.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
         r.bar:SetMinMaxValues(0, c.goal)
-        r.bar.text:Hide()
-        r.status = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.status:SetPoint("BOTTOMRIGHT", -6, 2)
+        local barBg = r.bar:CreateTexture(nil, "BACKGROUND")
+        barBg:SetAllPoints()
+        barBg:SetColorTexture(0, 0, 0, 0.6)
+        r.bar.text = r.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.bar.text:SetPoint("CENTER", 0, 0)
+        r.status = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        r.status:SetPoint("BOTTOMRIGHT", -8, 6)
         r.challenge = c
         rows[i] = r
     end
 
     function page:Refresh()
-        summary:SetText(("%d of %d challenges complete - %s bonus XP earned")
+        local hideDone = JumpCounterDB.ui.hideDone
+        hide:SetChecked(hideDone)
+        summary:SetText(("%d / %d complete  |cffffffff+%s XP earned|r")
             :format(CountCompleted(acct), #CHALLENGES, Fmt(acct.challengeXP)))
 
         -- Unfinished first (closest to done at the top), finished at the bottom.
@@ -2860,9 +3157,10 @@ local function BuildChallengesTab(page, width)
             local c = r.challenge
             local done = acct.done[c.id]
             r.sortKey = done and (2 + 1 / done) or (1 - math.min(c.progress(), c.goal) / c.goal)
-            table.insert(order, r)
+            if done and hideDone then r:Hide() else r:Show() table.insert(order, r) end
         end
         table.sort(order, function(a, b) return a.sortKey < b.sortKey end)
+        content:SetHeight(math.max(1, #order * ROW_H))
 
         for i, r in ipairs(order) do
             local c = r.challenge
@@ -2872,15 +3170,28 @@ local function BuildChallengesTab(page, width)
             local p = math.min(c.progress(), c.goal)
             r.reward:SetText("+" .. Fmt(c.xp) .. " XP")
             if done then
-                r.name:SetText("|cff33ff33" .. c.name .. "|r")
-                r.bar:SetValue(c.goal)
-                r.bar:SetStatusBarColor(0.2, 0.8, 0.2)
-                r.status:SetText("|cff33ff33Complete|r " .. GRAY:format(date("%Y-%m-%d", done)))
-            else
+                r.bg:SetColorTexture(0.35, 0.28, 0.05, 0.35)
+                r.border:SetColorTexture(1, 0.82, 0, 0.9)
+                r.icon:SetDesaturated(false)
+                r.icon:SetAlpha(1)
+                r.check:Show()
                 r.name:SetText(c.name)
+                r.name:SetTextColor(1, 0.82, 0)
+                r.bar:Hide()
+                r.status:SetText("Completed " .. date("%Y-%m-%d", done))
+            else
+                r.bg:SetColorTexture(1, 1, 1, 0.04)
+                r.border:SetColorTexture(0.5, 0.5, 0.5, 0.5)
+                r.icon:SetDesaturated(true)
+                r.icon:SetAlpha(0.7)
+                r.check:Hide()
+                r.name:SetText(c.name)
+                r.name:SetTextColor(0.9, 0.9, 0.9)
+                r.bar:Show()
                 r.bar:SetValue(p)
-                r.bar:SetStatusBarColor(1, 0.7, 0)
-                r.status:SetText(("%s / %s"):format(Fmt(p), Fmt(c.goal)))
+                r.bar:SetStatusBarColor(0.1, 0.6, 0.1)
+                r.bar.text:SetText(("%s / %s"):format(Fmt(p), Fmt(c.goal)))
+                r.status:SetText("")
             end
         end
     end
@@ -2977,115 +3288,156 @@ local function BuildSettingsTab(page, width)
 end
 
 ---------------------------------------------------------------------------
--- The window itself
+-- The window itself: a standard WoW panel (portrait, title, close button,
+-- inset) with tabs along the bottom, like the Character window.
 ---------------------------------------------------------------------------
 local TABS = {
+    { id = "overview",   label = "Overview",    build = BuildOverviewTab },
     { id = "board",      label = "Leaderboard", build = BuildLeaderboardTab },
     { id = "challenges", label = "Challenges",  build = BuildChallengesTab },
     { id = "settings",   label = "Settings",    build = BuildSettingsTab },
 }
 
 local function CreateMainFrame()
-    local W, H = 600, 600
-    local PAD = 16
-    local innerW = W - PAD * 2
-
-    local f = CreateFrame("Frame", "JumpCounterMain", UIParent, "BackdropTemplate")
+    local W, H = 640, 520
+    local f
+    if HasTemplate("ButtonFrameTemplate") then
+        f = CreateFrame("Frame", "JumpCounterMain", UIParent, "ButtonFrameTemplate")
+    else
+        f = CreateFrame("Frame", "JumpCounterMain", UIParent)
+    end
+    -- Did the template give us the Blizzard frame art?
+    local function Part(obj, key)
+        local v = obj and obj[key]
+        if type(v) == "table" then return v end
+    end
+    local native = Part(f, "Inset") ~= nil
+        and (Part(f, "CloseButton") or Part(f, "TitleText") or Part(f, "TitleContainer")) ~= nil
     f:SetSize(W, H)
     f:SetPoint("CENTER")
-    f:SetBackdrop(BACKDROP)
-    f:SetBackdropColor(0.04, 0.04, 0.06, 0.94)
-    f:SetFrameStrata("DIALOG")
+    f:SetFrameStrata("HIGH")
     f:SetToplevel(true)
     f:Hide()
     MakeMovable(f)
     tinsert(UISpecialFrames, "JumpCounterMain")
 
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -2, -2)
-
-    local appName = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    appName:SetPoint("TOPLEFT", PAD, -12)
-    appName:SetText("JumpingCounter " .. GRAY:format("v" .. VERSION))
-
-    -- Header: who you are and your level.
-    local header = CreateFrame("Frame", nil, f)
-    header:SetPoint("TOPLEFT", PAD, -34)
-    header:SetSize(innerW, 74)
-    local hbg = header:CreateTexture(nil, "BACKGROUND")
-    hbg:SetAllPoints()
-    hbg:SetColorTexture(1, 1, 1, 0.05)
-
-    local nameText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
-    nameText:SetPoint("TOPLEFT", 10, -8)
-    local levelText = header:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    levelText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -4)
-    local nextRankText = header:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    nextRankText:SetPoint("TOPRIGHT", -10, -12)
-    nextRankText:SetJustifyH("RIGHT")
-
-    local xpBar = ProgressBar(header, 14, 0.58, 0.2, 0.85)
-    xpBar:SetPoint("BOTTOMLEFT", 10, 8)
-    xpBar:SetPoint("BOTTOMRIGHT", -120, 8)
-
-    local prestigeButton = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    prestigeButton:SetSize(100, 22)
-    prestigeButton:SetPoint("BOTTOMRIGHT", -10, 4)
-    prestigeButton:SetText("Prestige!")
-    prestigeButton:SetScript("OnClick", function() AskPrestige() end)
-    prestigeButton:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Prestige")
-        GameTooltip:AddLine("Reset your jump level to 1 and earn a prestige star. "
-            .. "Total jumps, ranks, total XP and challenges are kept.", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    prestigeButton:SetScript("OnLeave", GameTooltip_Hide)
-    local prestigeInfo = header:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    prestigeInfo:SetPoint("BOTTOMRIGHT", -10, 9)
-    prestigeInfo:SetWidth(104)
-    prestigeInfo:SetJustifyH("RIGHT")
-
-    -- Stat tiles.
-    local tileDefs = { "Total jumps", "This week", "Per hour", "Deaths", "Challenges", "Leaderboard" }
-    local tiles = {}
-    local gap = 6
-    local tileW = (innerW - gap * (#tileDefs - 1)) / #tileDefs
-    for i, label in ipairs(tileDefs) do
-        local t = StatTile(f, label)
-        t:SetSize(tileW, 58)
-        t:SetPoint("TOPLEFT", PAD + (i - 1) * (tileW + gap), -116)
-        tiles[i] = t
+    if not native then
+        -- Fallback look: a tooltip-style box with a close button.
+        local bg = CreateFrame("Frame", nil, f, "BackdropTemplate")
+        bg:SetAllPoints()
+        bg:SetFrameLevel(math.max(0, f:GetFrameLevel() - 1))
+        bg:SetBackdrop(BACKDROP)
+        bg:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
+        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -2, -2)
     end
 
-    -- Tabs.
-    local tabButtons, pages = {}, {}
-    local tabW = 120
-    local contentTop = -218
-    for i, tab in ipairs(TABS) do
-        local b = FlatButton(f, tabW, 24, tab.label, "GameFontHighlight")
-        b:SetPoint("TOPLEFT", PAD + (i - 1) * (tabW + 4), -184)
-        b:SetScript("OnClick", function() f:ShowTab(tab.id) end)
-        tabButtons[tab.id] = b
+    -- Title.
+    local title = "JumpingCounter"
+    if Part(f, "TitleText") then
+        f.TitleText:SetText(title)
+    elseif Part(Part(f, "TitleContainer"), "TitleText") then
+        f.TitleContainer.TitleText:SetText(title)
+    elseif native and type(f.SetTitle) == "function" then
+        f:SetTitle(title)
+    else
+        local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        t:SetPoint("TOP", 0, -8)
+        t:SetText(title)
+    end
 
-        local page = CreateFrame("Frame", nil, f)
-        page:SetPoint("TOPLEFT", PAD, contentTop)
+    -- Portrait: your character, like the Character window.
+    local portrait = Part(f, "portrait") or Part(f, "Portrait") or Part(Part(f, "PortraitContainer"), "portrait")
+
+    -- Content area.
+    local content = Part(f, "Inset")
+    if content then
+        content:ClearAllPoints()
+        content:SetPoint("TOPLEFT", 4, -60)
+        content:SetPoint("BOTTOMRIGHT", -6, 6)
+    else
+        content = CreateFrame("Frame", nil, f)
+        content:SetPoint("TOPLEFT", 8, -60)
+        content:SetPoint("BOTTOMRIGHT", -8, 8)
+    end
+
+    -- The strip between title and content: version / update notice.
+    local strip = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    strip:SetPoint("TOPLEFT", 66, -36)
+    strip:SetPoint("TOPRIGHT", -12, -36)
+    strip:SetJustifyH("RIGHT")
+
+    -- Pages.
+    local PAD = 10
+    local innerW = W - 10 - PAD * 2
+    local pages = {}
+    for _, tab in ipairs(TABS) do
+        local page = CreateFrame("Frame", nil, content)
+        page:SetPoint("TOPLEFT", PAD, -PAD)
         page:SetPoint("BOTTOMRIGHT", -PAD, PAD)
         page:Hide()
         tab.build(page, innerW)
         pages[tab.id] = page
     end
-    local tabLine = f:CreateTexture(nil, "ARTWORK")
-    tabLine:SetColorTexture(1, 1, 1, 0.15)
-    tabLine:SetHeight(1)
-    tabLine:SetPoint("TOPLEFT", PAD, -208)
-    tabLine:SetPoint("TOPRIGHT", -PAD, -208)
+
+    -- Tabs along the bottom (Blizzard tab art if available).
+    local tabTemplate = (HasTemplate("PanelTabButtonTemplate") and "PanelTabButtonTemplate")
+        or (HasTemplate("CharacterFrameTabButtonTemplate") and "CharacterFrameTabButtonTemplate") or nil
+    local tabs = {}
+    for i, tab in ipairs(TABS) do
+        local b = CreateFrame("Button", "JumpCounterMainTab" .. i, f, tabTemplate)
+        b:SetID(i)
+        local art = Part(b, "Left") or Part(b, "LeftActive") or Part(b, "LeftDisabled")
+        if not art then
+            -- No Blizzard tab art: a simple flat tab.
+            b:SetSize(110, 26)
+            local bg = b:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(0.12, 0.1, 0.06, 0.95)
+            local hl = b:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 0.82, 0, 0.12)
+            if not b:GetFontString() then
+                local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                fs:SetPoint("CENTER")
+                b:SetFontString(fs)
+            end
+        end
+        b:SetText(tab.label)
+        if art and PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, b, 0) end
+        if i == 1 then
+            b:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 12, art and 2 or -2)
+        else
+            -- New (Dragonflight-style) tab art sits apart, old art overlaps.
+            b:SetPoint("TOPLEFT", tabs[i - 1], "TOPRIGHT", (not art or Part(b, "LeftActive")) and 3 or -15, 0)
+        end
+        b:SetScript("OnClick", function()
+            f:ShowTab(tab.id)
+            if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_TAB then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
+        end)
+        b.tabId = tab.id
+        tabs[i] = b
+    end
+    f.Tabs = tabs
+    f.numTabs = #tabs
+    if PanelTemplates_SetNumTabs then pcall(PanelTemplates_SetNumTabs, f, #tabs) end
+
+    local function SelectTab(index)
+        if PanelTemplates_SetTab and pcall(PanelTemplates_SetTab, f, index) then return end
+        for i, b in ipairs(tabs) do
+            local fs = b:GetFontString()
+            if fs then
+                if i == index then fs:SetTextColor(1, 1, 1) else fs:SetTextColor(1, 0.82, 0) end
+            end
+        end
+    end
 
     function f:ShowTab(id)
+        if not pages[id] then id = "overview" end
         JumpCounterDB.ui.mainTab = id
-        for tid, page in pairs(pages) do
-            page:SetShown(tid == id)
-            tabButtons[tid]:SetSelected(tid == id)
+        for i, tab in ipairs(TABS) do
+            pages[tab.id]:SetShown(tab.id == id)
+            if tab.id == id then SelectTab(i) end
         end
         if id == "board" then RequestScores() end
         pages[id]:Refresh()
@@ -3093,64 +3445,24 @@ local function CreateMainFrame()
 
     function f:RefreshHeader()
         local newer = NewestVersion()
-        appName:SetText("JumpingCounter " .. GRAY:format("v" .. VERSION)
-            .. (newer and ("   |cffff5555Update available: v%s - /jumps update|r"):format(newer) or ""))
-        local me = Me()
-        local prestige = EntryPrestige(me)
-        nameText:SetText(PrestigeTag(prestige) .. FactionIcon(MyFaction()) .. ColoredName(playerKey, charData.class))
-        local level, into, need = EntryLevel(me)
-        local rankTitle = GetJumpRank(me.total)
-        levelText:SetText(("Jump level |cffffd100%d|r   %s"):format(level,
-            rankTitle and ("|cffffd100" .. rankTitle .. "|r") or GRAY:format("no rank yet")))
-        local nextTitle, nextAt = NextJumpRank(me.total)
-        nextRankText:SetText(nextTitle
-            and ("Next rank: |cffffffff%s|r\nat %s jumps (%s to go)"):format(nextTitle, Fmt(nextAt), Fmt(nextAt - me.total))
-            or "Highest rank reached!")
-
-        xpBar:SetMinMaxValues(0, need)
-        xpBar:SetValue(into)
-        xpBar.text:SetText(("%s / %s XP to level %d"):format(Fmt(into), Fmt(need), level + 1))
-
-        if CanPrestige() then
-            prestigeButton:Show()
-            prestigeInfo:Hide()
-        else
-            prestigeButton:Hide()
-            prestigeInfo:Show()
-            prestigeInfo:SetText(("Prestige at level %d%s"):format(PRESTIGE_LEVEL,
-                prestige > 0 and ("\n" .. PrestigeTag(prestige) .. "earned") or ""))
-        end
-
-        tiles[1].value:SetText(Fmt(me.total))
-        local numChars = CountKeys(JumpCounterDB.chars)
-        tiles[1].sub:SetText(numChars > 1 and ("%d characters"):format(numChars)
-            or ("this session: " .. Fmt(sessionJumps)))
-        tiles[2].value:SetText(Fmt(MyWeekCount(me)))
-        local secs = SecondsUntilReset()
-        tiles[2].sub:SetText(secs and ("resets in " .. FormatDuration(secs)) or "")
-        local jph = JumpsPerHour(me)
-        tiles[3].value:SetText(jph and Fmt(jph) or "-")
-        tiles[3].sub:SetText(jph and "jumps / hour"
-            or ("%d / 30 min online"):format(math.floor(me.rate.seconds / 60)))
-        tiles[4].value:SetText(Fmt(me.deaths))
-        tiles[4].sub:SetText(("%s jumps since"):format(Fmt(acct.stats.sinceDeath)))
-        tiles[5].value:SetText(("%d / %d"):format(CountCompleted(acct), #CHALLENGES))
-        tiles[5].sub:SetText("+" .. Fmt(acct.challengeXP) .. " XP")
-        local list = BuildStandings("all")
-        local pos = MyRank()
-        tiles[6].value:SetText(pos and ("#" .. pos) or "-")
-        tiles[6].sub:SetText(("of %d players"):format(#list))
+        strip:SetText(newer and ("|cffff5555Update available: v%s|r - /jumps update"):format(newer)
+            or GRAY:format("v" .. VERSION))
+        if portrait and SetPortraitTexture then pcall(SetPortraitTexture, portrait, "player") end
     end
 
     function f:Refresh()
         self:RefreshHeader()
-        local id = JumpCounterDB.ui.mainTab or "board"
+        local id = JumpCounterDB.ui.mainTab or "overview"
         if pages[id] and pages[id]:IsShown() then pages[id]:Refresh() end
     end
 
     f:SetScript("OnShow", function(self)
-        self:ShowTab(JumpCounterDB.ui.mainTab or "board")
+        self:ShowTab(JumpCounterDB.ui.mainTab or "overview")
         self:RefreshHeader()
+        if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_OPEN then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_OPEN) end
+    end)
+    f:SetScript("OnHide", function()
+        if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_CLOSE then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_CLOSE) end
     end)
 
     mainFrame = f

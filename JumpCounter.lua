@@ -669,7 +669,8 @@ local knownWhisper = {}   -- [WhisperId(character name)] = true
 local function WhisperId(name)
     return ((name or ""):match("^[^%s%-]+") or name or ""):lower()
 end
-local knownBNet = {}      -- [gameAccountID] = true
+local knownBNet = {}      -- [gameAccountID] = GetTime() we last heard from them
+local BNET_HEARD_RECENTLY = 3600
 
 -- Online characters on your WoW friends list who aren't reached via guild/group.
 local function GetOnlineFriends()
@@ -768,8 +769,17 @@ local function Send(msg, discover, skipGuild)
             SendWhisper(name, msg)
         end
     end
+    local listed = {}
     for _, id in ipairs(GetBNetGameAccounts()) do
+        listed[id] = true
         if discover or knownBNet[id] then SendBNet(id, msg) end
+    end
+    -- Battle.net sometimes shows a friend as offline although they're
+    -- online (their messages still arrive). Anyone whose addon messaged us
+    -- in the last BNET_HEARD_RECENTLY is online: keep sending to them too.
+    local now = GetTime()
+    for id, heard in pairs(knownBNet) do
+        if not listed[id] and now - heard < BNET_HEARD_RECENTLY then SendBNet(id, msg) end
     end
 end
 
@@ -1288,7 +1298,7 @@ end
 
 local function OnBNetAddonMessage(prefix, msg, _, gameAccountID)
     if prefix ~= PREFIX or not gameAccountID then return end
-    knownBNet[gameAccountID] = true
+    knownBNet[gameAccountID] = GetTime()
     local key, display
     local info = C_BattleNet and C_BattleNet.GetGameAccountInfoByID
         and C_BattleNet.GetGameAccountInfoByID(gameAccountID)

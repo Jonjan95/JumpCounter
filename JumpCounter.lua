@@ -18,7 +18,6 @@ local dirty = false               -- total changed since last broadcast
 local lastReplyTime = 0
 
 local counterFrame, boardFrame
-local warnedVersion = false
 local ScoreMessage                -- defined in the networking section
 local OnPeerScore                 -- defined in the notifications section
 local ToggleChallenges            -- defined in the progression section
@@ -53,6 +52,66 @@ local function IsNewerVersion(a, b)
         if x ~= y then return x > y end
     end
     return false
+end
+
+---------------------------------------------------------------------------
+-- Update notice: when someone with a newer version is seen, show a popup
+-- with the download link (once per session). The newest version seen is
+-- saved, so the notice also shows right after logging in.
+---------------------------------------------------------------------------
+local DOWNLOAD_URL = "https://github.com/Jonjan95/JumpCounter/releases/latest"
+local updateShown = false
+
+-- The newer version we know of, or nil if we're up to date.
+local function NewestVersion()
+    local v = JumpCounterDB and JumpCounterDB.newestVersion
+    if v and IsNewerVersion(v, VERSION) then return v end
+end
+
+StaticPopupDialogs["JUMPCOUNTER_UPDATE"] = {
+    text = "%s\n\nCopy this link (Ctrl+C) and open it in your browser:",
+    button1 = OKAY,
+    hasEditBox = true,
+    editBoxWidth = 330,
+    OnShow = function(self)
+        local eb = self.editBox or self.EditBox
+        if eb then
+            eb:SetText(DOWNLOAD_URL)
+            eb:SetFocus()
+            eb:HighlightText()
+        end
+    end,
+    -- Keep the link intact if someone types in the box.
+    EditBoxOnTextChanged = function(self)
+        if self:GetText() ~= DOWNLOAD_URL then
+            self:SetText(DOWNLOAD_URL)
+            self:HighlightText()
+        end
+    end,
+    EditBoxOnEnterPressed = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+local function ShowUpdateNotice()
+    local v = NewestVersion()
+    if not v or updateShown then return end
+    updateShown = true
+    Print(("|cffff5555v%s is out - you have v%s.|r Get it at %s"):format(v, VERSION, DOWNLOAD_URL))
+    StaticPopup_Show("JUMPCOUNTER_UPDATE",
+        ("|cffffd100JumpCounter v%s is out!|r\nYou have v%s."):format(v, VERSION))
+end
+
+-- Called with the version of every score we receive.
+local function NoteVersion(version)
+    if not version or not version:match("^%d+%.%d+%.%d+$") then return end
+    if IsNewerVersion(version, JumpCounterDB.newestVersion or VERSION) then
+        JumpCounterDB.newestVersion = version
+    end
+    ShowUpdateNotice()
 end
 
 -- Turn a chat sender into a player key ("Name-Realm") plus a display name.
@@ -918,11 +977,7 @@ local function HandleMessage(msg, key, display, reply)
         if JumpCounterDB.peers[key] ~= entry then return end   -- itself a leftover copy
         OnPeerScore(key, oldTotal, total, entry.class, oldPrestige, entry.prestige)
 
-        if version and version ~= "" and IsNewerVersion(version, VERSION) and not warnedVersion then
-            warnedVersion = true
-            Print(("A newer version (%s) is out - you have %s. Ask %s for it!")
-                :format(version, VERSION, display or key:match("^[^-]+")))
-        end
+        NoteVersion(version)
         RefreshBoardSoon()
     elseif tag == "ME" then
         -- Our own "who am I" whisper (see LOGIN): the sender is our full name.
@@ -2154,6 +2209,9 @@ local function CreateMainFrame()
     end
 
     function f:RefreshHeader()
+        local newer = NewestVersion()
+        appName:SetText("JumpCounter " .. GRAY:format("v" .. VERSION)
+            .. (newer and ("   |cffff5555Update available: v%s - /jumps update|r"):format(newer) or ""))
         local me = Me()
         local prestige = EntryPrestige(me)
         nameText:SetText(PrestigeTag(prestige) .. ColoredName(playerKey, charData.class))
@@ -2326,6 +2384,12 @@ SlashCmdList.JUMPCOUNTER = function(input)
             if mainFrame and mainFrame:IsShown() then mainFrame:Refresh() end
             Print("This character is now shown as " .. charData.display .. ".")
         end
+    elseif cmd == "update" or cmd == "download" then
+        -- The download link, newer version or not.
+        local newer = NewestVersion()
+        StaticPopup_Show("JUMPCOUNTER_UPDATE", newer
+            and ("|cffffd100JumpCounter v%s is out!|r\nYou have v%s."):format(newer, VERSION)
+            or ("You have v%s, the newest version seen so far."):format(VERSION))
     elseif cmd == "minimap" then
         SetMinimapShown(not settings.minimapButton)
         Print("Minimap button " .. (settings.minimapButton and "shown." or "hidden - /jumps minimap brings it back."))
@@ -2372,7 +2436,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
             end
         end
         Print("You have v" .. VERSION .. (newest ~= VERSION
-            and (" - |cffff5555v" .. newest .. " is out, ask a friend for it!|r") or " (newest seen)"))
+            and (" - |cffff5555v" .. newest .. " is out!|r Get it at " .. DOWNLOAD_URL) or " (newest seen)"))
         if #outdated > 0 then
             table.sort(outdated)
             Print("Players on older versions: " .. table.concat(outdated, ", "))
@@ -2395,6 +2459,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
         Print("/jumps counter - show/hide the small on-screen counter")
         Print(("/jumps prestige - reset your jump level at level %d for a prestige star"):format(PRESTIGE_LEVEL))
         Print("/jumps name <full name> - set this character's full name (if only the first shows)")
+        Print("/jumps update - the download link for the newest version")
         Print("/jumps minimap - show/hide the minimap button")
         Print("/jumps lock - lock/unlock counter position")
         Print("/jumps share - announce your jumps in chat")
@@ -2457,6 +2522,9 @@ events:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
         InitDB()
         PruneStalePeers()
+        -- Updated since we last saw a newer version? Then forget it.
+        if JumpCounterDB.newestVersion and not NewestVersion() then JumpCounterDB.newestVersion = nil end
+        C_Timer.After(5, ShowUpdateNotice)
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
         CreateCounterFrame()
         CreateMainFrame()

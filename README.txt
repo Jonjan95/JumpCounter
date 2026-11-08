@@ -82,6 +82,7 @@ COMMANDS (/jumps or /jc)
   /jumps lock        lock/unlock the counter position
   /jumps share       post your total in chat
   /jumps version     your version, and who is on an older one
+  /jumps update      the download link for the newest version
   /jumps clear       remove other players from your leaderboard
   /jumps reset       reset this character's jump count (others keep theirs)
   /jumps help        list commands

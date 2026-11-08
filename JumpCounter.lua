@@ -76,9 +76,9 @@ local function IsNewerVersion(a, b)
 end
 
 ---------------------------------------------------------------------------
--- Update notice: when someone with a newer version is seen, show a window
--- with the CurseForge link (once per session). The newest version seen is
--- saved, so the notice also shows right after logging in.
+-- Update notice: when someone with a newer version is seen, one short chat
+-- line (once per session). The newest version seen is saved, so it also
+-- shows right after logging in. /jumps update opens the window with the link.
 ---------------------------------------------------------------------------
 -- Unlisted project: only reachable through this link.
 local CURSEFORGE_URL = "https://www.curseforge.com/wow/addons/jumpingcounter"
@@ -94,10 +94,8 @@ local function ShowUpdateNotice()
     local v = NewestVersion()
     if not v or updateShown then return end
     updateShown = true
-    Print(("|cffff5555New version out: v%s (you have v%s).|r Update on CurseForge: %s"
-        .. " - for automatic updates, right-click JumpingCounter in the CurseForge app > Install settings"
-        .. " > Automatic."):format(v, VERSION, CURSEFORGE_URL))
-    ShowUpdateWindow(v)
+    Print(("|cffffd100v%s is out|r (you have v%s) - update in the CurseForge app. "
+        .. "|cff999999/jumps update for the link.|r"):format(v, VERSION))
 end
 
 -- Called with the version of every score we receive.

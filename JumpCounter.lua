@@ -408,8 +408,11 @@ local CHALLENGES = {
       desc = "Jump 250 times in a battleground.",             progress = function() return Stat("pvp") end },
     { id = "night",    name = "Night Owl",         xp = 500,  goal = 500,
       desc = "Jump 500 times between midnight and 4 AM.",     progress = function() return Stat("night") end },
-    { id = "lowhp",    name = "Living Dangerously", xp = 750, goal = 25,
-      desc = "Jump 25 times in combat below 20% health.",     progress = function() return Stat("lowHealth") end },
+    -- (Was "below 20% health in combat" - health is a hidden "secret" value
+    -- in combat on Forever, so addons can't read it. Same id, so anyone who
+    -- already completed it keeps it.)
+    { id = "lowhp",    name = "Living Dangerously", xp = 750, goal = 500,
+      desc = "Jump 500 times while flagged for PvP.",         progress = function() return Stat("pvpFlagged") end },
     { id = "maxlevel", name = "Seasoned Hopper",   xp = 1500, goal = 5000,
       desc = "Jump 5,000 times at max character level.",      progress = function() return Stat("maxLevel") end },
     { id = "classes1", name = "Jack of All Hops",  xp = 1000, goal = 3,
@@ -1606,28 +1609,31 @@ end
 local function TrackJump(inWater)
     local st = acct.stats
     local function inc(name) st[name] = (st[name] or 0) + 1 end
+    -- In combat the game hides some values from addons ("secret values");
+    -- using one is an error. Treat a hidden value as unknown instead.
+    local function plain(v)
+        if issecretvalue and issecretvalue(v) then return nil end
+        return v
+    end
 
-    if IsMounted() then inc("mounted") end
+    if plain(IsMounted()) then inc("mounted") end
     if inWater then inc("swim") end
-    if UnitIsGhost("player") then inc("ghost") end
-    if UnitAffectingCombat("player") then inc("combat") end
+    if plain(UnitIsGhost("player")) then inc("ghost") end
+    if plain(UnitAffectingCombat("player")) then inc("combat") end
     local inInstance, instanceType = IsInInstance()
     if inInstance and (instanceType == "party" or instanceType == "raid") then inc("instance") end
-    if IsInGroup() and GetNumGroupMembers() >= 5 then inc("group") end
+    if IsInGroup() and (plain(GetNumGroupMembers()) or 0) >= 5 then inc("group") end
     if inInstance and instanceType == "pvp" then inc("pvp") end
-    if IsResting() then inc("resting") end
-    if IsStealthed and IsStealthed() then inc("stealth") end
+    if plain(IsResting()) then inc("resting") end
+    if IsStealthed and plain(IsStealthed()) then inc("stealth") end
+    if UnitIsPVP and plain(UnitIsPVP("player")) then inc("pvpFlagged") end
     -- Only druid forms and Ghost Wolf (warrior stances are "forms" too).
     local class = charData.class
-    if (class == "DRUID" or class == "SHAMAN") and (GetShapeshiftForm() or 0) > 0 then inc("shapeshift") end
+    if (class == "DRUID" or class == "SHAMAN") and (plain(GetShapeshiftForm()) or 0) > 0 then inc("shapeshift") end
     local hour = tonumber(date("%H"))
     if hour and hour < 4 then inc("night") end
-    if UnitAffectingCombat("player") then
-        local hp, maxHp = UnitHealth("player"), UnitHealthMax("player")
-        if maxHp and maxHp > 0 and hp / maxHp < 0.2 then inc("lowHealth") end
-    end
     local maxLevel = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 60
-    if UnitLevel("player") >= maxLevel then inc("maxLevel") end
+    if (plain(UnitLevel("player")) or 0) >= maxLevel then inc("maxLevel") end
 
     local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
     if mapID then

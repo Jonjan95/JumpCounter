@@ -2575,9 +2575,15 @@ do
         return bestKey, bestCount, bestClass
     end
 
+    -- Who the chat last said holds the crown. Changes in between (too soon
+    -- after the last line, or early in the hour) aren't lost: once a line is
+    -- allowed again and the holder differs, the current holder is announced.
+    local announcedKey
+
+    -- Returns true if the line was shown.
     local function CrownNews(key, prev, class, count)
-        if not settings.crownNews or GetTime() - lastNews < CROWN_NEWS_GAP then return end
-        if GetServerTime() % 3600 < CROWN_QUIET then return end
+        if not settings.crownNews or GetTime() - lastNews < CROWN_NEWS_GAP then return false end
+        if GetServerTime() % 3600 < CROWN_QUIET then return false end
         lastNews = GetTime()
         local name = ColoredName(key, class)
         if key == playerKey then
@@ -2587,6 +2593,7 @@ do
         else
             Print(("%s%s took the crown with %d jumps this hour."):format(CROWN_ICON, name, count))
         end
+        return true
     end
 
     -- Every few seconds: has the crown changed hands, or has the hour ended?
@@ -2605,18 +2612,18 @@ do
                 Print(("%s%s won the crown with %d jumps this hour!"):format(CROWN_ICON,
                     ColoredName(holderKey, holderClass), holderCount))
             end
-            holderKey = nil
+            holderKey, announcedKey = nil, nil
         end
         holderHour = hid
 
         local key, count, class = Leader()
-        if key ~= holderKey then
-            local prev = holderKey
-            holderKey = key
-            -- No news for whoever already had it when we logged in.
-            if key and started then CrownNews(key, prev, class, count) end
-        end
+        holderKey = key
         if key then holderClass, holderCount = class, count end
+        if not started then
+            announcedKey = key            -- no news for whoever had it when we logged in
+        elseif key and key ~= announcedKey then
+            if CrownNews(key, announcedKey, class, count) then announcedKey = key end
+        end
         started = true
         if crownKey ~= key then
             crownKey = key

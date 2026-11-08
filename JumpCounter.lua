@@ -28,6 +28,7 @@ local OnPeerScore                 -- defined in the notifications section
 local ToggleChallenges            -- defined in the progression section
 local CheckChallenges             -- defined in the progression section
 local OnDuelMessage               -- defined in the jump duels section
+local ShowUpdateWindow            -- defined after the counter window
 local settings                    -- JumpCounterDB.settings
 
 local DEFAULT_SETTINGS = {
@@ -63,11 +64,13 @@ local function IsNewerVersion(a, b)
 end
 
 ---------------------------------------------------------------------------
--- Update notice: when someone with a newer version is seen, show a popup
--- with the download link (once per session). The newest version seen is
+-- Update notice: when someone with a newer version is seen, show a window
+-- with the download links (once per session). The newest version seen is
 -- saved, so the notice also shows right after logging in.
 ---------------------------------------------------------------------------
 local DOWNLOAD_URL = "https://github.com/Jonjan95/JumpCounter/releases/latest"
+-- Unlisted project: only reachable through this link.
+local CURSEFORGE_URL = "https://www.curseforge.com/wow/addons/jumpingcounter"
 local updateShown = false
 
 -- The newer version we know of, or nil if we're up to date.
@@ -76,41 +79,13 @@ local function NewestVersion()
     if v and IsNewerVersion(v, VERSION) then return v end
 end
 
-StaticPopupDialogs["JUMPCOUNTER_UPDATE"] = {
-    text = "%s\n\nCopy this link (Ctrl+C) and open it in your browser:",
-    button1 = OKAY,
-    hasEditBox = true,
-    editBoxWidth = 330,
-    OnShow = function(self)
-        local eb = self.editBox or self.EditBox
-        if eb then
-            eb:SetText(DOWNLOAD_URL)
-            eb:SetFocus()
-            eb:HighlightText()
-        end
-    end,
-    -- Keep the link intact if someone types in the box.
-    EditBoxOnTextChanged = function(self)
-        if self:GetText() ~= DOWNLOAD_URL then
-            self:SetText(DOWNLOAD_URL)
-            self:HighlightText()
-        end
-    end,
-    EditBoxOnEnterPressed = function(self) self:GetParent():Hide() end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,
-}
-
 local function ShowUpdateNotice()
     local v = NewestVersion()
     if not v or updateShown then return end
     updateShown = true
-    Print(("|cffff5555v%s is out - you have v%s.|r Get it at %s"):format(v, VERSION, DOWNLOAD_URL))
-    StaticPopup_Show("JUMPCOUNTER_UPDATE",
-        ("|cffffd100JumpCounter v%s is out!|r\nYou have v%s."):format(v, VERSION))
+    Print(("|cffff5555JumpCounter v%s is out - you have v%s.|r Update via CurseForge (JumpingCounter): %s"
+        .. " or download it: %s"):format(v, VERSION, CURSEFORGE_URL, DOWNLOAD_URL))
+    ShowUpdateWindow(v)
 end
 
 -- Called with the version of every score we receive.
@@ -1249,6 +1224,99 @@ local BACKDROP = {
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 },
 }
+
+---------------------------------------------------------------------------
+-- Update window: a new version is out, plus both download links to copy.
+---------------------------------------------------------------------------
+do
+    local frame
+
+    -- A box holding a link; clicking it selects the whole link for Ctrl+C.
+    local function LinkBox(parent, url, width)
+        local eb = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+        eb:SetSize(width, 20)
+        eb:SetAutoFocus(false)
+        eb:SetFontObject("ChatFontNormal")
+        eb:SetText(url)
+        eb:SetCursorPosition(0)
+        eb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+        eb:SetScript("OnMouseUp", function(self) self:SetFocus() self:HighlightText() end)
+        -- Keep the link intact if someone types in the box.
+        eb:SetScript("OnTextChanged", function(self, userInput)
+            if userInput and self:GetText() ~= url then
+                self:SetText(url)
+                self:HighlightText()
+            end
+        end)
+        eb:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+        eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() frame:Hide() end)
+        return eb
+    end
+
+    local function Create()
+        local W = 460
+        local f = CreateFrame("Frame", "JumpCounterUpdateFrame", UIParent, "BackdropTemplate")
+        f:SetSize(W, 268)
+        f:SetPoint("CENTER", 0, 120)
+        f:SetBackdrop(BACKDROP)
+        f:SetBackdropColor(0.04, 0.04, 0.06, 0.96)
+        f:SetFrameStrata("DIALOG")
+        f:SetToplevel(true)
+        MakeMovable(f)
+        tinsert(UISpecialFrames, "JumpCounterUpdateFrame")
+
+        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -2, -2)
+
+        f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        f.title:SetPoint("TOP", 0, -18)
+        f.text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        f.text:SetPoint("TOP", f.title, "BOTTOM", 0, -8)
+        f.text:SetWidth(W - 40)
+
+        local cfLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        cfLabel:SetPoint("TOPLEFT", 24, -92)
+        cfLabel:SetText("CurseForge |cff999999(JumpingCounter - one-click updates in the CurseForge app)|r")
+        f.cf = LinkBox(f, CURSEFORGE_URL, W - 56)
+        f.cf:SetPoint("TOPLEFT", cfLabel, "BOTTOMLEFT", 6, -4)
+
+        local ghLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        ghLabel:SetPoint("TOPLEFT", 24, -146)
+        ghLabel:SetText("Or download the zip yourself |cff999999(GitHub)|r")
+        f.gh = LinkBox(f, DOWNLOAD_URL, W - 56)
+        f.gh:SetPoint("TOPLEFT", ghLabel, "BOTTOMLEFT", 6, -4)
+
+        local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        hint:SetPoint("TOP", 0, -202)
+        hint:SetWidth(W - 40)
+        hint:SetText("Click a link, press Ctrl+C and paste it in your browser.\n"
+            .. "After updating, type /reload (or restart the game).")
+
+        local ok = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        ok:SetSize(110, 22)
+        ok:SetPoint("BOTTOM", 0, 14)
+        ok:SetText(OKAY or "Okay")
+        ok:SetScript("OnClick", function() f:Hide() end)
+        return f
+    end
+
+    -- newer: the version that's out, or nil to just show the links.
+    function ShowUpdateWindow(newer)
+        frame = frame or Create()
+        if newer then
+            frame.title:SetText(("JumpCounter v%s is out!"):format(newer))
+            frame.text:SetText(("You have v%s. Update to get the latest features and fixes - "
+                .. "and to keep playing with friends on the newest version."):format(VERSION))
+        else
+            frame.title:SetText("Get JumpCounter")
+            frame.text:SetText(("You have v%s, the newest version seen so far. "
+                .. "Share these links with friends:"):format(VERSION))
+        end
+        frame:Show()
+        frame.cf:SetFocus()
+        frame.cf:HighlightText()
+    end
+end
 
 local function CreateCounterFrame()
     local f = CreateFrame("Frame", "JumpCounterFrame", UIParent, "BackdropTemplate")
@@ -2928,10 +2996,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
         DuelCommand()
     elseif cmd == "update" or cmd == "download" then
         -- The download link, newer version or not.
-        local newer = NewestVersion()
-        StaticPopup_Show("JUMPCOUNTER_UPDATE", newer
-            and ("|cffffd100JumpCounter v%s is out!|r\nYou have v%s."):format(newer, VERSION)
-            or ("You have v%s, the newest version seen so far."):format(VERSION))
+        ShowUpdateWindow(NewestVersion())
     elseif cmd == "minimap" then
         SetMinimapShown(not settings.minimapButton)
         Print("Minimap button " .. (settings.minimapButton and "shown." or "hidden - /jumps minimap brings it back."))
@@ -2978,7 +3043,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
             end
         end
         Print("You have v" .. VERSION .. (newest ~= VERSION
-            and (" - |cffff5555v" .. newest .. " is out!|r Get it at " .. DOWNLOAD_URL) or " (newest seen)"))
+            and (" - |cffff5555v" .. newest .. " is out!|r Type /jumps update for the links.") or " (newest seen)"))
         if #outdated > 0 then
             table.sort(outdated)
             Print("Players on older versions: " .. table.concat(outdated, ", "))
@@ -3002,7 +3067,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
         Print(("/jumps prestige - reset your jump level at level %d for a prestige star"):format(PRESTIGE_LEVEL))
         Print("/jumps name <full name> - set this character's full name (if only the first shows)")
         Print("/jumps duel - challenge a random player who is jumping right now")
-        Print("/jumps update - the download link for the newest version")
+        Print("/jumps update - the download links (CurseForge and GitHub)")
         Print("/jumps minimap - show/hide the minimap button")
         Print("/jumps lock - lock/unlock counter position")
         Print("/jumps share - announce your jumps in chat")

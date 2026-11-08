@@ -5,6 +5,10 @@ Counts your jumps and deaths, gives you jump levels, ranks and challenges,
 and puts you on a leaderboard with your friends.
 
 INSTALL
+  Easiest: install "JumpingCounter" with the CurseForge app (game version
+  Forever) from https://www.curseforge.com/wow/addons/jumpingcounter
+  - updates are then one click. Or by hand from
+  https://github.com/Jonjan95/JumpCounter/releases/latest :
   1. Unzip so you get a folder named "JumpCounter".
   2. Put it in:  World of Warcraft\_forever_\Interface\AddOns\
      (the .toc file must be at AddOns\JumpCounter\JumpCounter.toc,
@@ -94,7 +98,7 @@ COMMANDS (/jumps or /jc)
   /jumps lock        lock/unlock the counter position
   /jumps share       post your total in chat
   /jumps version     your version, and who is on an older one
-  /jumps update      the download link for the newest version
+  /jumps update      the download links (CurseForge and GitHub)
   /jumps duel        challenge a random player who is jumping right now
   /jumps clear       remove other players from your leaderboard
   /jumps reset       reset this character's jump count (others keep theirs)

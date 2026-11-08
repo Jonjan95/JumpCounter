@@ -84,8 +84,10 @@ THE CROWN
   hour, so anyone can take it. Needs at least 25 jumps that hour.
 
 JUMPS PER HOUR
-  Jumps divided by your online time, not counting time flagged AFK. Shown
-  after 30 minutes of online time (counted from v0.9.0).
+  Your jumps divided by your online time over the last 7 days, not
+  counting time flagged AFK - so everyone is compared on what they did
+  recently, whether they've had the addon for a day or a month. Shown
+  after 30 minutes of online time in those 7 days (counted from v1.8.2).
 
 JUMP RANKS
   Your all-time jumps earn you rank titles, from your first 100 jumps to

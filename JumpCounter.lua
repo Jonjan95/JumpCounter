@@ -444,17 +444,49 @@ local function CountCompleted(data)
 end
 
 ---------------------------------------------------------------------------
--- Jumps per hour: only shown once RATE_MIN_SECONDS of online time is tracked.
+-- Jumps per hour: jumps / online time (not AFK) over the last RATE_DAYS
+-- days, so everyone is compared on what they did recently - long-time
+-- players aren't dragged down by old playtime, new players aren't boosted
+-- by a short burst. Only shown once RATE_MIN_SECONDS of online time is in
+-- the window. Kept account-wide in one bucket per (server) day.
 ---------------------------------------------------------------------------
 local RATE_MIN_SECONDS = 1800
+local RATE_DAYS = 7
+local RATE_SINCE = "1.8.2"        -- older versions send an all-time rate: not comparable
 
--- Our own characters keep the raw numbers; peers send the finished rate.
+local function RateDay() return math.floor(GetServerTime() / 86400) end
+
+-- Add jumps / online seconds to today's bucket; drop days out of the window.
+local function AddRate(jumps, seconds)
+    local days = acct.rateDays
+    local today = RateDay()
+    local b = days[today]
+    if not b then
+        for d in pairs(days) do
+            if d <= today - RATE_DAYS then days[d] = nil end
+        end
+        b = { 0, 0 }
+        days[today] = b
+    end
+    b[1], b[2] = b[1] + jumps, b[2] + seconds
+end
+
+-- Jumps and online seconds over the last RATE_DAYS days.
+local function RecentRate()
+    local jumps, seconds, first = 0, 0, RateDay() - RATE_DAYS + 1
+    for d, b in pairs(acct.rateDays) do
+        if d >= first then jumps, seconds = jumps + b[1], seconds + b[2] end
+    end
+    return jumps, seconds
+end
+
+-- Ours: from the raw numbers. Peers send the finished rate.
 local function JumpsPerHour(data)
     if data.rate then
         if (data.rate.seconds or 0) < RATE_MIN_SECONDS then return nil end
         return data.rate.jumps / data.rate.seconds * 3600
     end
-    return data.jph
+    if data.version and not IsNewerVersion(RATE_SINCE, data.version) then return data.jph end
 end
 
 ---------------------------------------------------------------------------
@@ -591,6 +623,7 @@ local function InitDB()
     st.zones = st.zones or {}
     st.capitals = st.capitals or {}
     st.days = st.days or {}
+    acct.rateDays = acct.rateDays or {}   -- 1.8.2: [server day] = { jumps, online seconds }
 end
 
 -- "A" / "H" for the character you're playing.
@@ -623,11 +656,8 @@ local function Me()
         me.total = me.total + (c.total or 0)
         if wid and c.weekId == wid then me.week = me.week + (c.week or 0) end
         me.deaths = me.deaths + (c.deaths or 0)
-        if c.rate then
-            me.rate.jumps = me.rate.jumps + (c.rate.jumps or 0)
-            me.rate.seconds = me.rate.seconds + (c.rate.seconds or 0)
-        end
     end
+    me.rate.jumps, me.rate.seconds = RecentRate()     -- last 7 days, whole account
     return me
 end
 
@@ -2341,7 +2371,8 @@ local function OnJump()
 
     charData.total = charData.total + 1
     sessionJumps = sessionJumps + 1
-    charData.rate.jumps = charData.rate.jumps + 1
+    charData.rate.jumps = charData.rate.jumps + 1   -- all-time, kept per character
+    AddRate(1, 0)
     local wid = CurrentWeekId()
     if wid then
         if charData.weekId ~= wid then
@@ -2531,7 +2562,8 @@ local function ShowEntryTooltip(owner, entry)
         line("Crowns won", Fmt(isMe and (acct.crowns or 0) or data.crowns))
     end
     local jph = JumpsPerHour(data)
-    line("Jumps per hour", jph and Fmt(jph) or (isMe and "after 30 min online" or "?"))
+    line("Jumps per hour (7 days)", jph and Fmt(jph) or (isMe and "after 30 min online"
+        or (data.version and IsNewerVersion(RATE_SINCE, data.version) and "needs v" .. RATE_SINCE) or "?"))
     line("Deaths", data.deaths and Fmt(data.deaths) or "?")
     local challenges = isMe and CountCompleted(acct) or data.challenges
     line("Challenges", challenges and ("%d / %d"):format(challenges, #CHALLENGES) or "?")
@@ -2767,7 +2799,7 @@ local function BuildLeaderboardTab(page, width)
                 or "weeks start Monday 00:00 UTC",
             hour = ("most jumps this hour wins the crown - %d min left"):format(
                 math.ceil((3600 - GetServerTime() % 3600) / 60)),
-            rate = "online time, not AFK, shown after 30 min",
+            rate = "last 7 days of online time, not AFK - after 30 min",
             level = "XP = jumps + challenge rewards",
             deaths = "deaths counted since v0.7.0",
         })[mode] or "syncs with guild, group & friends - hover a player for details"
@@ -3411,6 +3443,7 @@ events:SetScript("OnEvent", function(_, event, ...)
             if not Plain(UnitIsAFK("player")) then
                 local before = JumpsPerHour(Me())
                 charData.rate.seconds = charData.rate.seconds + dt
+                AddRate(0, dt)
                 -- Share the rate once it first becomes available.
                 if not before and JumpsPerHour(Me()) then dirty = true end
             end

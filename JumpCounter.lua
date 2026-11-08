@@ -581,6 +581,19 @@ local function InitDB()
     st.days = st.days or {}
 end
 
+-- "A" / "H" for the character you're playing.
+local function MyFaction()
+    local f = UnitFactionGroup("player")
+    return (f == "Alliance" and "A") or (f == "Horde" and "H") or nil
+end
+
+local FACTION_NAMES = { A = "Alliance", H = "Horde" }
+local FACTION_ICONS = {
+    A = "|TInterface\\Icons\\INV_BannerPVP_02:14:14:0:0:64:64:5:59:5:59|t ",
+    H = "|TInterface\\Icons\\INV_BannerPVP_01:14:14:0:0:64:64:5:59:5:59|t ",
+}
+local function FactionIcon(f) return FACTION_ICONS[f or ""] or "" end
+
 -- Your account as one leaderboard entry: every character's jumps, deaths,
 -- week and online time added up, plus the shared level and challenges.
 -- Shown under the character you are playing.
@@ -588,7 +601,7 @@ local function Me()
     local wid = CurrentWeekId()
     local me = { total = 0, week = 0, weekId = wid, deaths = 0, rate = { jumps = 0, seconds = 0 },
         challengeXP = acct.challengeXP + (acct.duelXP or 0), prestige = acct.prestige, done = acct.done,
-        duelWins = acct.duelWins or 0,
+        duelWins = acct.duelWins or 0, faction = MyFaction(),
         class = charData.class, display = charData.display }
     for _, c in pairs(JumpCounterDB.chars) do
         me.total = me.total + (c.total or 0)
@@ -698,7 +711,9 @@ local function ProcessQueue()
 end
 
 local function Enqueue(msg, channel, target, bnet)
-    local id = (bnet and "bn" or channel) .. ":" .. tostring(target) .. ":" .. (msg:match("^[^:]+") or msg)
+    -- Relayed scores ("R:<acct>:...") are one message per account.
+    local kind = msg:match("^(R:[^:]+)") or msg:match("^[^:]+") or msg
+    local id = (bnet and "bn" or channel) .. ":" .. tostring(target) .. ":" .. kind
     if queuedKeys[id] then
         -- Already waiting to go out: just send the newest content.
         for _, item in ipairs(sendQueue) do
@@ -762,7 +777,8 @@ function ScoreMessage()
         UnitLevel("player") or 0, EntryXP(me), CountCompleted(me),
         jph and math.floor(jph + 0.5) or "", EntryPrestige(me), acct.id }, ":")
     -- 1.5.0: duels won, after the character list (older versions ignore it).
-    local suffix = ":" .. (acct.duelWins or 0)
+    -- 1.6.0: faction ("A" / "H") after that.
+    local suffix = ":" .. (acct.duelWins or 0) .. ":" .. (MyFaction() or "")
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -871,6 +887,119 @@ local function RefreshBoardSoon()
     end)
 end
 
+---------------------------------------------------------------------------
+-- Passing scores along (1.6.0). Players also share the scores they know, so
+-- friends of friends show up too - including the other faction through a
+-- Battle.net friend. Scores are passed on at most twice (hops), only if
+-- updated in the last RELAY_MAX_AGE, and in small batches:
+--  * to a friend (whisper / Battle.net) when we first hear from them, then
+--    at most every RELAY_CONTACT_INTERVAL;
+--  * to the guild, only scores that didn't come from the guild, at most
+--    every RELAY_GUILD_INTERVAL, skipping what someone else already sent.
+-- R:<acct>:<key>:<name>:<class>:<faction>:<total>:<weekId>:<week>:<deaths>
+--  :<char level>:<xp>:<challenges>:<jph>:<prestige>:<duel wins>:<version>:<seen>:<hops>
+---------------------------------------------------------------------------
+local RELAY_MAX_AGE = 3 * 86400
+local RELAY_MAX_HOPS = 2
+local RELAY_BATCH = 40
+local RELAY_GUILD_INTERVAL = 600
+local RELAY_CONTACT_INTERVAL = 1800
+local relayedToContact = {}       -- [contact key] = GetTime() of the last batch
+local guildRelayed = {}           -- [acct] = newest "seen" already passed around the guild
+local lastGuildRelay = -RELAY_GUILD_INTERVAL
+
+local function NoColon(v) return (tostring(v or ""):gsub(":", "")) end
+
+local function RelayMessage(key, data)
+    local function n(v) return v ~= nil and tostring(v) or "" end
+    return table.concat({ "R", data.acct, NoColon(key), NoColon(data.display), n(data.class),
+        n(data.faction), n(data.total), n(data.weekId), n(data.week), n(data.deaths),
+        n(data.charLevel), n(data.xp), n(data.challenges), n(data.jph), n(data.prestige),
+        n(data.duelWins), n(data.version), n(data.seen), (data.hops or 0) + 1 }, ":")
+end
+
+-- Up to RELAY_BATCH passable scores (newest first) that pass filter(data).
+local function RelayBatch(filter)
+    local list = {}
+    local now = time()
+    for key, data in pairs(JumpCounterDB.peers) do
+        if data.acct and (data.hops or 0) < RELAY_MAX_HOPS and now - (data.seen or 0) <= RELAY_MAX_AGE
+            and filter(data) then
+            table.insert(list, { key = key, data = data })
+        end
+    end
+    table.sort(list, function(a, b) return (a.data.seen or 0) > (b.data.seen or 0) end)
+    for i = #list, RELAY_BATCH + 1, -1 do list[i] = nil end
+    return list
+end
+
+-- A friend we just heard from directly: tell them who we know.
+local function RelayToContact(contactKey, reply, contactAcct)
+    local last = relayedToContact[contactKey]
+    if last and GetTime() - last < RELAY_CONTACT_INTERVAL then return end
+    relayedToContact[contactKey] = GetTime()
+    for _, e in ipairs(RelayBatch(function(d) return d.acct ~= contactAcct end)) do
+        reply(RelayMessage(e.key, e.data))
+    end
+end
+
+-- Tell the guild about players it can't hear itself.
+local function RelayToGuild()
+    if not IsInGuild() or GetTime() - lastGuildRelay < RELAY_GUILD_INTERVAL then return end
+    lastGuildRelay = GetTime()
+    local batch = RelayBatch(function(d)
+        return d.via ~= "GUILD" and (guildRelayed[d.acct] or 0) < (d.seen or 0)
+    end)
+    for _, e in ipairs(batch) do
+        guildRelayed[e.data.acct] = e.data.seen
+        Enqueue(RelayMessage(e.key, e.data), "GUILD")
+    end
+end
+
+local function ApplyRelay(msg, via)
+    local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
+        rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops = strsplit(":", msg)
+    rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
+    if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
+        or not rKey or rKey == "" then return end
+    if via == "GUILD" then guildRelayed[rAcct] = math.max(guildRelayed[rAcct] or 0, rSeen) end
+    rSeen = math.min(rSeen, time())             -- other computers' clocks may run ahead
+    if time() - rSeen > RELAY_MAX_AGE then return end
+
+    local peers = JumpCounterDB.peers
+    local key, entry
+    for k, d in pairs(peers) do
+        if d.acct == rAcct then key, entry = k, d break end
+    end
+    if entry and (entry.seen or 0) >= rSeen then return end   -- we know newer
+    if not key then
+        key = NormalizeSender(rKey)
+        if key == playerKey or JumpCounterDB.chars[key] then return end
+        local taken = peers[key]
+        if taken and taken.acct and taken.acct ~= rAcct then key = key .. "~" .. rAcct:sub(1, 6) end
+    end
+    entry = entry or {}
+    local function num(v) return tonumber(v) end
+    entry.acct = rAcct
+    entry.display = (rDisplay ~= "" and rDisplay) or entry.display
+    entry.class = (rClass ~= "" and rClass) or entry.class
+    entry.faction = (rFaction == "A" or rFaction == "H") and rFaction or entry.faction
+    entry.total = rTotal
+    entry.weekId, entry.week = num(rWeekId), num(rWeek)
+    entry.deaths = num(rDeaths)
+    entry.charLevel = num(rLevel) or entry.charLevel
+    entry.xp, entry.challenges, entry.jph = num(rXP), num(rChallenges), num(rJph)
+    entry.prestige, entry.duelWins = num(rPrestige), num(rDuels)
+    entry.version = (rVersion ~= "" and rVersion) or entry.version
+    entry.seen = rSeen
+    entry.hops = tonumber(rHops) or RELAY_MAX_HOPS
+    entry.via = "RELAY"
+    peers[key] = entry
+    NoteVersion(entry.version)
+    PruneStalePeers()
+    RefreshBoardSoon()
+end
+
 -- UnitName("player") only gives the first name; messages we receive from
 -- ourselves carry the full one ("Zivv Pewpew").
 local function LearnMyName(display)
@@ -912,13 +1041,18 @@ end
 
 -- key/display: who sent it, as best the channel can tell us.
 -- reply(msg): sends a message straight back to the sender, or nil.
-local function HandleMessage(msg, key, display, reply)
+-- via: "GUILD", "GROUP", "WHISPER" or "BNET".
+local function HandleMessage(msg, key, display, reply, via)
     if msg:match("^D[QAGPF]:") then
         OnDuelMessage(msg)
         return
     end
+    if msg:match("^R:") then
+        ApplyRelay(msg, via)
+        return
+    end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
-        charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins = strsplit(":", msg)
+        charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -989,6 +1123,8 @@ local function HandleMessage(msg, key, display, reply)
         entry.acct = acctId                       -- these two are nil before 1.1.0
         entry.characters = (characters and characters ~= "") and characters or nil
         entry.duelWins = tonumber(duelWins)       -- nil before 1.5.0
+        entry.faction = (faction == "A" or faction == "H") and faction or entry.faction   -- 1.6.0
+        entry.via, entry.hops = via, 0            -- heard directly
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
         JumpCounterDB.peers[key] = entry
@@ -997,6 +1133,8 @@ local function HandleMessage(msg, key, display, reply)
         OnPeerScore(key, oldTotal, total, entry.class, oldPrestige, entry.prestige)
 
         NoteVersion(version)
+        -- A friend heard directly: pass on the scores we know.
+        if reply and acctId then RelayToContact(key, reply, acctId) end
         RefreshBoardSoon()
     elseif tag == "ME" then
         -- Our own "who am I" whisper (see LOGIN): the sender is our full name.
@@ -1009,7 +1147,10 @@ local function HandleMessage(msg, key, display, reply)
             -- Someone asked the guild/group; answer once, after a random
             -- delay so a big guild doesn't all answer in the same second.
             lastReplyTime = GetTime()
-            C_Timer.After(math.random() * 10, function() BroadcastScore() end)
+            C_Timer.After(math.random() * 10, function()
+                BroadcastScore()
+                if via == "GUILD" then RelayToGuild() end
+            end)
         end
     end
 end
@@ -1023,7 +1164,8 @@ local function OnAddonMessage(prefix, msg, channel, sender)
         knownWhisper[sender:match("^[^-]+")] = true
         reply = function(m) SendWhisper(sender, m) end
     end
-    HandleMessage(msg, key, display, reply)
+    local via = (channel == "GUILD" and "GUILD") or (channel == "WHISPER" and "WHISPER") or "GROUP"
+    HandleMessage(msg, key, display, reply, via)
 end
 
 local function OnBNetAddonMessage(prefix, msg, _, gameAccountID)
@@ -1038,7 +1180,7 @@ local function OnBNetAddonMessage(prefix, msg, _, gameAccountID)
     end
     -- Messages from current versions carry their own key, so a missing name is fine.
     HandleMessage(msg, key or ("bnet-" .. gameAccountID), display,
-        function(m) SendBNet(gameAccountID, m) end)
+        function(m) SendBNet(gameAccountID, m) end, "BNET")
 end
 
 ---------------------------------------------------------------------------
@@ -1542,6 +1684,7 @@ local function DuelCandidates(now)
     local list = {}
     for key, data in pairs(JumpCounterDB.peers) do
         if data.acct and data.version and not IsNewerVersion(DUEL_MIN_VERSION, data.version)
+            and (data.hops or 0) == 0          -- heard directly, so we can reach them
             and time() - (data.seen or 0) <= DUEL_ACTIVE and (busyUntil[data.acct] or 0) < now then
             table.insert(list, { acct = data.acct, name = DisplayName(key), class = data.class })
         end
@@ -2021,6 +2164,7 @@ local function ShowEntryTooltip(owner, entry)
 
     local function line(label, value) GameTooltip:AddDoubleLine(label, value, 0.75, 0.75, 0.75, 1, 1, 1) end
     local charLevel = isMe and UnitLevel("player") or data.charLevel
+    if data.faction then line("Faction", FactionIcon(data.faction) .. FACTION_NAMES[data.faction]) end
     line("Character level", charLevel and tostring(charLevel) or "?")
     line("Total jumps", Fmt(entry.total))
     line("This week", Fmt(MyWeekCount(data)))
@@ -2071,7 +2215,8 @@ local function ShowEntryTooltip(owner, entry)
     end
     if not isMe and data.seen then
         local ago = time() - data.seen
-        line("Last update", ago < 60 and "just now" or (FormatDuration(ago) .. " ago"))
+        line("Last update", (ago < 60 and "just now" or (FormatDuration(ago) .. " ago"))
+            .. ((data.hops or 0) > 0 and " (via friends)" or ""))
     end
     GameTooltip:Show()
 end
@@ -2164,7 +2309,7 @@ local function BuildLeaderboardTab(page, width)
             local isMe = entry.key == playerKey
             row.bg:SetColorTexture(1, 0.82, 0, isMe and 0.12 or 0)
             row.rank:SetText(pos and (pos .. ".") or "")
-            row.name:SetText(ColoredName(entry.key, entry.class))
+            row.name:SetText(FactionIcon((entry.data or {}).faction) .. ColoredName(entry.key, entry.class))
             local data = entry.data or {}
             local rankTitle = GetJumpRank(entry.total)
             row.level:SetText(("%sLv %d %s"):format(PrestigeTag(EntryPrestige(data)), (EntryLevel(data)),
@@ -2544,7 +2689,7 @@ local function CreateMainFrame()
             .. (newer and ("   |cffff5555Update available: v%s - /jumps update|r"):format(newer) or ""))
         local me = Me()
         local prestige = EntryPrestige(me)
-        nameText:SetText(PrestigeTag(prestige) .. ColoredName(playerKey, charData.class))
+        nameText:SetText(PrestigeTag(prestige) .. FactionIcon(MyFaction()) .. ColoredName(playerKey, charData.class))
         local level, into, need = EntryLevel(me)
         local rankTitle = GetJumpRank(me.total)
         levelText:SetText(("Jump level |cffffd100%d|r   %s"):format(level,
@@ -2887,6 +3032,11 @@ events:SetScript("OnEvent", function(_, event, ...)
 
         CreateDuelFrame()
         C_Timer.NewTicker(60, MaybeStartRandomDuel)
+        -- Pass scores from outside the guild on to the guild now and then
+        -- (random delay so guild members don't all send at once).
+        C_Timer.NewTicker(RELAY_GUILD_INTERVAL, function()
+            C_Timer.After(math.random() * 120, RelayToGuild)
+        end)
 
         C_Timer.NewTicker(BROADCAST_INTERVAL, function()
             if dirty then BroadcastScore() end

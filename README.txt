@@ -45,6 +45,10 @@ HOW SCORES SYNC
     - on your in-game friends list and online
     - your Battle.net friend and online in WoW (works across factions!)
 
+  Friends also pass on the scores they know, so friends of friends show up
+  too - including the other faction through a Battle.net friend. Those rows
+  say "via friends" on hover. The faction icon is shown next to each name.
+
 CHAT MESSAGES (change them in the Settings tab)
     - your milestones: 100, 500 and every 1,000 jumps
     - your level-ups, completed challenges and new ranks

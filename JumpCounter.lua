@@ -1306,7 +1306,7 @@ end
 -- reply(msg): sends a message straight back to the sender, or nil.
 -- via: "GUILD", "GROUP", "WHISPER" or "BNET".
 local function HandleMessage(msg, key, display, reply, via)
-    if msg:match("^D[QAGPF]:") then
+    if msg:match("^D[QAGPFN]:") then
         OnDuelMessage(msg, reply, via)
         return
     end
@@ -2193,7 +2193,7 @@ do
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
 
     local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, route, ... }
-    local SendDuelTo
+    local SendDuelTo, ChallengeNext
     -- When our last duel ended (server time) is saved account-wide in
     -- acct.lastDuelEnd, so /reload or switching characters doesn't reset the
     -- cooldown.
@@ -2265,6 +2265,38 @@ do
         return settings.duels and not duel and not Plain(UnitIsAFK("player")) and not CantJump()
             and CooldownLeft(now) == 0 and PairLeft(now, oppAcct) == 0
     end
+
+    -- 1.8.4: why we can't duel this opponent now (sent back as DN), with the
+    -- seconds until we can (for cooldowns), or nil if we can.
+    local function DeclineReason(now, oppAcct)
+        local function on(f)
+            if not f then return false end
+            local v = f("player")
+            if issecretvalue and issecretvalue(v) then return false end
+            return v and true or false
+        end
+        if not settings.duels then return "off" end
+        if duel then return "busy" end
+        if Plain(UnitIsAFK("player")) then return "afk" end
+        if on(UnitOnTaxi) then return "taxi" end
+        if on(UnitInVehicle) then return "vehicle" end
+        if on(UnitIsDeadOrGhost) then return "dead" end
+        if PairLeft(now, oppAcct) > 0 then return "pair", PairLeft(now, oppAcct) end
+        if CooldownLeft(now) > 0 then return "cooldown", CooldownLeft(now) end
+    end
+
+    local DECLINE_TEXT = {
+        off = "%s has jump duels turned off.",
+        busy = "%s is already in a jump duel.",
+        afk = "%s is AFK.",
+        taxi = "%s is on a flight path.",
+        vehicle = "%s is in a vehicle.",
+        dead = "%s is dead.",
+        cooldown = "%s just had a duel - they can duel again in %d min.",
+        pair = "You and %s dueled recently - you can duel each other again in %d min.",
+    }
+    -- How long to skip someone after they declined (seconds) when picking.
+    local DECLINE_SKIP = { off = 1800, busy = 90, afk = 300, taxi = 180, vehicle = 180, dead = 120 }
 
     -- Players on 1.5.0+ who jumped recently and aren't in a duel.
     local function DuelCandidates(now)
@@ -2393,12 +2425,15 @@ do
         local d = duel
         if d and d.state ~= "on" and now >= d.start then
             -- The invite was never confirmed.
+            duel = nil
             if d.manual and d.state == "invited" then
+                -- No answer (versions before 1.8.4 don't say why).
                 Print(("%s didn't accept the duel (busy, AFK, on a flight path, dueled recently, "
                     .. "or duels turned off)."):format(
                     ClassColored(d.opp.name, d.opp.class)))
+                busyUntil[d.opp.acct] = now + 300
+                ChallengeNext((d.tries or 1) + 1)
             end
-            duel = nil
         elseif d and d.state == "on" then
             if now >= d.finish and not d.sentFinal then
                 d.sentFinal, d.doneAt = true, now
@@ -2439,14 +2474,14 @@ do
     end
 
     -- Invite a random active player. Returns the opponent, or nil.
-    local function TryStartDuel(manual)
+    local function TryStartDuel(manual, tries)
         local now = GetServerTime()
         local list = DuelCandidates(now)
         if #list == 0 then return nil end
         local opp = list[math.random(#list)]
         local start = now + DUEL_LEAD
-        duel = { id = acct.id .. now, start = start, finish = start + DUEL_LENGTH, state = "invited",
-            opp = opp, mine = 0, theirs = 0, manual = manual }
+        duel = { id = acct.id .. now .. (tries or 1), start = start, finish = start + DUEL_LENGTH, state = "invited",
+            opp = opp, mine = 0, theirs = 0, manual = manual, tries = tries or 1 }
         SendDuel("DQ", duel.id, start, acct.id, Clean(MyDuelName()), charData.class,
             opp.acct, manual and "1" or "", DUEL_LENGTH)
         StartDuelTicker()
@@ -2471,7 +2506,14 @@ do
             local length = tonumber(a7) or OLD_DUEL_LENGTH
             if length < 30 or length > 600 then return end
             if a5 ~= acct.id or a2 == acct.id or not start then return end
-            if not CanDuel(now, a2) or start - now < 5 or start - now > 60 then return end
+            if start - now < 5 or start - now > 60 then return end
+            local reason, secs = DeclineReason(now, a2)
+            if reason then
+                if a6 == "1" then
+                    SendDuelTo({ route = { reply = reply, via = via } }, "DN", id, acct.id, reason, secs or 0)
+                end
+                return
+            end
             duel = { id = id, start = start, finish = start + length, state = "accepted",
                 opp = { acct = a2, name = a3, class = (a4 ~= "" and a4) or nil }, mine = 0, theirs = 0 }
             Learn()
@@ -2489,10 +2531,27 @@ do
             -- Go: a1 start, a2/a3/a4 inviter, a5/a6/a7 invited
             local start = tonumber(a1)
             if not start then return end
-            busyUntil[a2], busyUntil[a5] = start + OLD_DUEL_LENGTH, start + OLD_DUEL_LENGTH
+            -- Both are busy for the duel and their cooldown after it.
+            busyUntil[a2], busyUntil[a5] = start + DUEL_LENGTH + DUEL_COOLDOWN, start + DUEL_LENGTH + DUEL_COOLDOWN
             if duel and duel.id == id and duel.state == "accepted" then
                 duel.state, duel.finish, duel.start = "on", start + (duel.finish - duel.start), start
                 AnnounceDuelStart()
+            end
+        elseif tag == "DN" then
+            -- Declined: a1 their acct, a2 reason, a3 seconds until they can.
+            if duel and duel.id == id and duel.state == "invited" and a1 == duel.opp.acct then
+                local d, secs = duel, tonumber(a3) or 0
+                local name = ClassColored(d.opp.name, d.opp.class)
+                local text = DECLINE_TEXT[a2] or "%s can't duel right now."
+                Print(text:format(name, math.ceil(secs / 60)))
+                if a2 == "pair" then
+                    acct.duelPairs = acct.duelPairs or {}
+                    acct.duelPairs[a1] = now - (PAIR_COOLDOWN - secs)
+                else
+                    busyUntil[a1] = now + ((a2 == "cooldown") and secs or (DECLINE_SKIP[a2] or 300))
+                end
+                duel = nil
+                if d.manual then ChallengeNext((d.tries or 1) + 1) end
             end
         elseif tag == "DP" then
             if duel and duel.id == id and a1 == duel.opp.acct then
@@ -2594,9 +2653,24 @@ do
             Print(("You had a jump duel recently - you can duel again in %d min.")
                 :format(math.ceil(CooldownLeft(GetServerTime()) / 60)))
         else
-            local opp = TryStartDuel(true)
+            ChallengeNext(1)
+        end
+    end
+
+    -- /jumps duel, try number "tries": challenge someone; after a decline the
+    -- next player is tried automatically (up to 3 tries).
+    function ChallengeNext(tries)
+        if tries > 3 then
+            Print("No one could duel right now - try again in a few minutes.")
+            return
+        end
+        do
+            local opp = TryStartDuel(true, tries)
             if opp then
-                Print(("Challenging %s to a jump duel..."):format(ClassColored(opp.name, opp.class)))
+                Print(("%s %s to a jump duel..."):format(tries > 1 and "Trying" or "Challenging",
+                    ClassColored(opp.name, opp.class)))
+            elseif tries > 1 then
+                Print("Nobody else to duel right now.")
             else
                 -- Anyone left out only because we dueled them recently?
                 local now, waits = GetServerTime(), {}

@@ -2800,7 +2800,7 @@ local function ShowEntryTooltip(owner, entry)
         line("Crowns won", Fmt(isMe and (acct.crowns or 0) or data.crowns))
     end
     local jph = JumpsPerHour(data)
-    line("Jumps per hour (7 days)", jph and Fmt(jph) or (isMe and "after 30 min online"
+    line("Avg / hour (7 days)", jph and Fmt(jph) or (isMe and "after 30 min online"
         or (data.version and IsNewerVersion(RATE_SINCE, data.version) and "needs v" .. RATE_SINCE) or "?"))
     line("Deaths", data.deaths and Fmt(data.deaths) or "?")
     local challenges = isMe and CountCompleted(acct) or data.challenges
@@ -2995,7 +2995,7 @@ local function BuildOverviewTab(page, width)
             local secs = SecondsUntilReset()
             return Fmt(MyWeekCount(me)) .. (secs and GRAY:format(" (resets in " .. FormatDuration(secs) .. ")") or "")
           end },
-        { label = "Per hour", get = function()
+        { label = "Avg / hour", get = function()
             local jph = JumpsPerHour(me)
             return jph and Fmt(jph) or GRAY:format(("%d / 30 min online"):format(math.floor(me.rate.seconds / 60)))
           end,
@@ -3072,20 +3072,23 @@ end
 -- header to sort by it.
 ---------------------------------------------------------------------------
 local BOARD_COLUMNS = {
-    { label = "#",        width = 28,  justify = "RIGHT" },
-    { label = "Player",   width = 152, justify = "LEFT" },
-    { label = "Level",    width = 58,  justify = "LEFT",  sort = "level",
+    { label = "#",          width = 28,  justify = "RIGHT" },
+    { label = "Player",     width = 150, justify = "LEFT" },
+    { label = "Level",      width = 52,  justify = "LEFT",  sort = "level",
       tip = "Jump level (and prestige stars). Sorts by total XP." },
-    { label = "Title",    width = 120, justify = "LEFT",
+    { label = "Title",      width = 112, justify = "LEFT",
       tip = "Jump rank title, earned by all-time jumps." },
-    { label = "Jumps",    width = 70,  justify = "RIGHT", sort = "all",    tip = "All-time jumps." },
-    { label = "Hour",     width = 50,  justify = "RIGHT", sort = "hour",
-      tip = "Jumps this hour. The most holds the crown." },
-    { label = "Week",     width = 60,  justify = "RIGHT", sort = "week",   tip = "Jumps this week." },
-    { label = "Per hour", width = 62,  justify = "RIGHT", sort = "rate",
-      tip = "Jumps per hour of online time, last 7 days." },
-    { label = "Deaths",   width = 52,  justify = "RIGHT", sort = "deaths" },
-    { label = "Duels",    width = 52,  justify = "RIGHT", sort = "duels",
+    { label = "Total",      width = 64,  justify = "RIGHT", sort = "all",  tip = "All-time jumps." },
+    { label = "This hour",  width = 62,  justify = "RIGHT", sort = "hour",
+      tip = function()
+          return ("Jumps since the hour started (%s-%s). Whoever has the most holds the crown.")
+              :format(date("%H:00"), date("%H:00", time() + 3600))
+      end },
+    { label = "This week",  width = 64,  justify = "RIGHT", sort = "week", tip = "Jumps since the weekly reset." },
+    { label = "Avg / hour", width = 66,  justify = "RIGHT", sort = "rate",
+      tip = "Average jumps per hour of online time over the last 7 days (time flagged AFK doesn't count)." },
+    { label = "Deaths",     width = 48,  justify = "RIGHT", sort = "deaths" },
+    { label = "Duels",      width = 48,  justify = "RIGHT", sort = "duels",
       tip = "Jump duels won. Sorts by duel rank (hover a player to see it)." },
 }
 
@@ -3164,7 +3167,8 @@ local function BuildLeaderboardTab(page, width)
             h:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_TOP")
                 GameTooltip:AddLine(col.label)
-                if col.tip then GameTooltip:AddLine(col.tip, 1, 1, 1, true) end
+                local tip = type(col.tip) == "function" and col.tip() or col.tip
+                if tip then GameTooltip:AddLine(tip, 1, 1, 1, true) end
                 GameTooltip:AddLine("Click to sort by this column.", 0.6, 0.6, 0.6)
                 GameTooltip:Show()
             end)
@@ -3317,7 +3321,7 @@ local function BuildLeaderboardTab(page, width)
                 math.ceil((3600 - GetServerTime() % 3600) / 60)),
             week = SecondsUntilReset() and ("week resets in " .. FormatDuration(SecondsUntilReset()))
                 or "weeks start Monday 00:00 UTC",
-            rate = "last 7 days of online time, not AFK",
+            rate = "average jumps per hour online, last 7 days (not AFK)",
             level = "XP = jumps + challenge, duel and crown rewards",
             duels = "duel rank points: win +20, draw +10, loss +5",
         })[mode] or "click a column to sort - hover a player for details"

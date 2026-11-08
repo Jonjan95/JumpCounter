@@ -29,8 +29,9 @@ OPEN IT
 
     Overview     your jump level, rank, next rank, XP bar and all your
                  numbers. A "Prestige!" button appears here at level 50.
-    Leaderboard  everyone you can see: level, jumps, this hour, this week,
-                 per hour and deaths. Click a column header to sort by it,
+    Leaderboard  everyone you can see: level, title, total jumps, this hour,
+                 this week, average per hour, deaths and duels won. Click
+                 a column header to sort by it,
                  hover a player for all their details. Your own row is
                  always shown at the bottom.
     Challenges   today's three daily challenges, then every challenge,
@@ -93,7 +94,7 @@ THE CROWN
   hour ends, the holder wins it and gets bonus XP. A fresh race every
   hour, so anyone can take it. Needs at least 25 jumps that hour.
 
-JUMPS PER HOUR
+AVERAGE JUMPS PER HOUR (Avg / hour)
   Your jumps divided by your online time over the last 7 days, not
   counting time flagged AFK - so everyone is compared on what they did
   recently, whether they've had the addon for a day or a month. Shown

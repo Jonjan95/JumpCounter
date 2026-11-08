@@ -254,12 +254,13 @@ local function GetJumpRank(total)
 end
 
 ---------------------------------------------------------------------------
--- Jump levels: XP = 1 per jump + challenge rewards.
--- Going from level L to L+1 costs 50 + 25*(L-1) XP, so roughly
--- level 8 at 1,000 XP, 27 at 10,000 and 88 at 100,000.
+-- Jump levels: XP = 1 per jump + challenge, daily, duel and crown rewards.
+-- 1.8.3: going from level L to L+1 costs 60 + 3*(L-1) XP (it was
+-- 50 + 25*(L-1)), so level 50 - and a prestige star - takes 6,468 XP:
+-- about one star every 2.5 to 4.5 days of normal play.
 ---------------------------------------------------------------------------
 local function XPForLevel(level)
-    return 50 + 25 * (level - 1)
+    return 60 + 3 * (level - 1)
 end
 
 -- Returns level, XP into the current level, XP needed for the next level.
@@ -286,22 +287,35 @@ end
 -- to reach PRESTIGE_LEVEL); extra XP carries over. Total jumps, ranks, total
 -- XP and challenges are kept.
 ---------------------------------------------------------------------------
--- 1.8.2: prestige at level 50 (it was 30). Stars earned before keep their
--- old price (OLD_PRESTIGE_XP each), so nobody's level or stars change; each
--- account tracks the XP its stars used up (prestigeSpent) and shares it.
+-- 1.8.3: everyone's stars were recalculated from total XP with the new
+-- level curve (once, when you update: PRESTIGE_MODEL). Friends still on an
+-- older version are recalculated the same way on our screen, so the same
+-- XP always shows the same stars and level.
 local PRESTIGE_LEVEL = 50
 local PRESTIGE_XP = 0
-for l = 1, PRESTIGE_LEVEL - 1 do PRESTIGE_XP = PRESTIGE_XP + XPForLevel(l) end   -- 31,850
-local OLD_PRESTIGE_XP = 11600     -- a star from before 1.8.2 (prestige at level 30)
+for l = 1, PRESTIGE_LEVEL - 1 do PRESTIGE_XP = PRESTIGE_XP + XPForLevel(l) end   -- 6,468
+local PRESTIGE_MODEL = 2          -- 1 = stars bought under the old rules
+local PRESTIGE_SINCE = "1.8.3"    -- versions from here on send stars of the new model
+
+-- A friend on an older version: their stars follow the old rules.
+local function OldPrestigeModel(data)
+    return data.version ~= nil and IsNewerVersion(PRESTIGE_SINCE, data.version)
+end
+
+-- Stars an amount of XP is worth (used for the recalculation).
+local function StarsForXP(xp)
+    return math.floor(math.max(0, xp or 0) / PRESTIGE_XP)
+end
 
 local function EntryPrestige(data)
+    if OldPrestigeModel(data) then return StarsForXP(EntryXP(data)) end
     return data.prestige or 0
 end
 
--- XP used up by an entry's prestige stars. Versions before 1.8.2 don't send
--- it; all their stars were bought at the old price.
+-- XP used up by an entry's prestige stars.
 local function PrestigeSpent(data)
-    return data.prestigeSpent or EntryPrestige(data) * OLD_PRESTIGE_XP
+    if OldPrestigeModel(data) then return StarsForXP(EntryXP(data)) * PRESTIGE_XP end
+    return data.prestigeSpent or EntryPrestige(data) * PRESTIGE_XP
 end
 
 -- Current jump level (after prestige resets): level, XP into it, XP needed.
@@ -452,12 +466,12 @@ local CHALLENGES = {
       desc = "Jump 100 times on characters of 3 different classes.", progress = function() return ClassCount() end },
     { id = "classes2", name = "Master of Many",    xp = 2500, goal = 5,
       desc = "Jump 100 times on characters of 5 different classes.", progress = function() return ClassCount() end },
-    { id = "prestige1", name = "Born Again",       xp = 500,  goal = 1,
-      desc = "Prestige once.",                                progress = function() return acct.prestige end },
-    { id = "prestige2", name = "Star Collector",   xp = 1500, goal = 3,
-      desc = "Reach Prestige 3.",                             progress = function() return acct.prestige end },
-    { id = "prestige3", name = "Constellation",    xp = 3000, goal = 5,
+    { id = "prestige1", name = "Born Again",       xp = 500,  goal = 5,
       desc = "Reach Prestige 5.",                             progress = function() return acct.prestige end },
+    { id = "prestige2", name = "Star Collector",   xp = 1500, goal = 15,
+      desc = "Reach Prestige 15.",                            progress = function() return acct.prestige end },
+    { id = "prestige3", name = "Constellation",    xp = 3000, goal = 30,
+      desc = "Reach Prestige 30.",                            progress = function() return acct.prestige end },
 
     -- 1.5.0: jump duels.
     { id = "duel1",    name = "Duelist",           xp = 300,  goal = 1,
@@ -659,8 +673,7 @@ local function InitDB()
         acct.id = table.concat(hex)
     end
     acct.prestige = acct.prestige or 0
-    -- 1.8.2: stars from before were bought at the old price (level 30).
-    acct.prestigeSpent = acct.prestigeSpent or acct.prestige * OLD_PRESTIGE_XP
+    acct.prestigeSpent = acct.prestigeSpent or acct.prestige * PRESTIGE_XP
     -- 1.8.2: duels played before duel ranks count too.
     acct.duelPoints = acct.duelPoints or ((acct.duelWins or 0) * DUEL_POINTS.win
         + (acct.duelDraws or 0) * DUEL_POINTS.draw + (acct.duelLosses or 0) * DUEL_POINTS.loss)
@@ -1810,7 +1823,10 @@ local minuteJumps = {}            -- timestamps of jumps in the last 60 seconds
 local function CheckLevelUp()
     local level = EntryLevel(Me())
     if knownLevel and level > knownLevel and settings.myProgress then
-        Print(GOLD:format(("Jump level %d!"):format(level)))
+        -- Levels come quickly now: a chat line every 5 levels.
+        if math.floor(level / 5) > math.floor(knownLevel / 5) then
+            Print(GOLD:format(("Jump level %d!"):format(level)))
+        end
         if level >= PRESTIGE_LEVEL and knownLevel < PRESTIGE_LEVEL then
             Notify(GOLD:format("You can now Prestige! Open /jumps to do it."), true)
         end
@@ -4149,6 +4165,21 @@ events:SetScript("OnEvent", function(_, event, ...)
         CreateMainFrame()
         CreateOptionsPanel()
         CreateMinimapButton()
+        -- 1.8.3: prestige was rebalanced - recalculate our stars from total
+        -- XP, once.
+        if (acct.prestigeModel or 1) < PRESTIGE_MODEL then
+            local before = acct.prestige or 0
+            local stars = StarsForXP(EntryXP(Me()))
+            acct.prestige, acct.prestigeSpent, acct.prestigeModel = stars, stars * PRESTIGE_XP, PRESTIGE_MODEL
+            dirty = true
+            if stars ~= before or before > 0 then
+                C_Timer.After(6, function()
+                    Print(GOLD:format(("Prestige has been rebalanced: your stars were recalculated from your "
+                        .. "total XP. You now have %d prestige %s. %s"):format(stars,
+                        stars == 1 and "star" or "stars", PrestigeTag(stars))))
+                end)
+            end
+        end
         knownLevel = EntryLevel(Me())
         LearnMyNameFromUnit()
         -- Stats combined from several characters (or new challenges) may

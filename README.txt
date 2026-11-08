@@ -61,11 +61,13 @@ CHAT MESSAGES (change them in the Settings tab)
     - when you pass someone on the leaderboard, or they pass you
 
 JUMP LEVELS, CHALLENGES & PRESTIGE
-  Every jump on any of your characters gives 1 XP, and challenges (once per
-  account) give bonus XP (about level 8 at 1,000 XP, 27 at 10,000). At jump
-  level 50 you can prestige: your level goes back to 1 and you get a star.
-  Total jumps, ranks, total XP and challenges are kept. (Before v1.8.2 it
-  was level 30 - stars earned then are kept as they are.)
+  Every jump on any of your characters gives 1 XP, and challenges, daily
+  challenges, duels and the crown give bonus XP (about level 13 at 1,000 XP,
+  42 at 5,000). At jump level 50 you can prestige: your level goes back to 1
+  and you get a star - about one every 2.5 to 4.5 days of normal play.
+  Total jumps, ranks, total XP and challenges are kept. (In v1.8.3 everyone's
+  stars were recalculated from their total XP, so the same XP always means
+  the same stars.)
 
   There are lots of challenges to find - open the Challenges tab to see
   what you're working towards.

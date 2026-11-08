@@ -232,7 +232,7 @@ local DUEL_RANKS = {
     { 700,  "Champion" },
     { 1000, "Grand Champion" },
     { 1400, "Jump Gladiator" },
-    { 2000, "Legend of the Duel" },
+    { 2000, "Duel Legend" },
 }
 
 -- Duel rank for some points: title, next title, points needed for it.
@@ -3164,10 +3164,10 @@ local BOARD_COLUMNS = {
               :format(date("%H:00"), date("%H:00", time() + 3600))
       end },
     { label = "This week",  width = 64,  justify = "RIGHT", sort = "week", tip = "Jumps since the weekly reset." },
-    { label = "Avg / hour", width = 66,  justify = "RIGHT", sort = "rate",
+    { label = "Avg/hour",   width = 66,  justify = "RIGHT", sort = "rate",
       tip = "Average jumps per hour of online time over the last 7 days (time flagged AFK doesn't count)." },
     { label = "Deaths",     width = 48,  justify = "RIGHT", sort = "deaths" },
-    { label = "Duel rank",  width = 140, justify = "LEFT",  sort = "duels",
+    { label = "Duel rank",  width = 112, justify = "LEFT",  sort = "duels",
       tip = "Duel rank and duel points: a win +20, a draw +10, a loss +5 for playing, "
           .. "and every 3rd loss in a row +15 extra. Points never go down." },
     { label = "Wins",       width = 46,  justify = "RIGHT", sort = "wins", tip = "Jump duels won." },
@@ -3206,6 +3206,11 @@ local function BuildTable(sort)
 end
 
 local function BuildLeaderboardTab(page, width)
+    -- The last column takes whatever width is left, so the header row ends
+    -- exactly where the rows do (rows stop 24 px short, for the scroll bar).
+    local used = 0
+    for i = 1, #BOARD_COLUMNS - 1 do used = used + BOARD_COLUMNS[i].width end
+    BOARD_COLUMNS[#BOARD_COLUMNS].width = math.max(40, width - 24 - used)
     local ROW_H = 18
     local ROWS = BOARD_ROWS
     local HEAD_H = 22
@@ -3230,6 +3235,7 @@ local function BuildLeaderboardTab(page, width)
         h.text:SetPoint("LEFT", 5, 0)
         h.text:SetPoint("RIGHT", -5, 0)
         h.text:SetJustifyH(col.justify)
+        h.text:SetWordWrap(false)
         h.text:SetText(col.label)
         h.line = h:CreateTexture(nil, "ARTWORK")
         h.line:SetColorTexture(1, 0.82, 0, 1)
@@ -3708,7 +3714,7 @@ local TABS = {
 }
 
 local function CreateMainFrame()
-    local W, H = 900, 520
+    local W, H = 860, 520
     local f
     if HasTemplate("ButtonFrameTemplate") then
         f = CreateFrame("Frame", "JumpCounterMain", UIParent, "ButtonFrameTemplate")

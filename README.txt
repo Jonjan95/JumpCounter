@@ -81,6 +81,12 @@ JUMP DUELS
   /jumps duel. Turn them off (or the results of others' duels) in Settings.
   Both players need v1.7.0 or newer.
 
+  DUEL RANKS: every duel gives duel points - a win +20, a draw +10 and
+  a loss +5 for playing, plus a bonus when luck isn't on your side.
+  Points never go down, and they move you up through the duel ranks.
+  Others see your rank and wins (hover your name, or sort the
+  leaderboard by the Duels column).
+
 THE CROWN
   Whoever jumps the most in the current hour holds the crown (shown next
   to their name on the leaderboard - see the "This hour" tab). When the

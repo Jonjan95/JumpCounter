@@ -217,6 +217,33 @@ local JUMP_RANKS = {
     { 5000000, "Defier of Worlds" },
 }
 
+-- Duel ranks (1.8.2): duel points only ever go up - a win +20, a draw +10,
+-- a loss +5 for playing, and every 3rd loss in a row +15 extra - so losing
+-- never sets you back. Only wins and rank are shown to others.
+local DUEL_POINTS = { win = 20, draw = 10, loss = 5, comeback = 15, comebackEvery = 3 }
+local DUEL_RANKS = {
+    { 0,    "Unranked" },
+    { 20,   "Novice Duelist" },
+    { 60,   "Scrapper" },
+    { 120,  "Contender" },
+    { 200,  "Challenger" },
+    { 320,  "Rival" },
+    { 480,  "Duelist" },
+    { 700,  "Champion" },
+    { 1000, "Grand Champion" },
+    { 1400, "Jump Gladiator" },
+    { 2000, "Legend of the Duel" },
+}
+
+-- Duel rank for some points: title, next title, points needed for it.
+local function DuelRank(points)
+    local title, nextTitle, nextAt = DUEL_RANKS[1][2]
+    for _, r in ipairs(DUEL_RANKS) do
+        if (points or 0) >= r[1] then title = r[2] else nextTitle, nextAt = r[2], r[1] break end
+    end
+    return title, nextTitle, nextAt
+end
+
 -- Returns the rank title for a total, and the threshold it was earned at.
 local function GetJumpRank(total)
     local title, threshold
@@ -634,6 +661,9 @@ local function InitDB()
     acct.prestige = acct.prestige or 0
     -- 1.8.2: stars from before were bought at the old price (level 30).
     acct.prestigeSpent = acct.prestigeSpent or acct.prestige * OLD_PRESTIGE_XP
+    -- 1.8.2: duels played before duel ranks count too.
+    acct.duelPoints = acct.duelPoints or ((acct.duelWins or 0) * DUEL_POINTS.win
+        + (acct.duelDraws or 0) * DUEL_POINTS.draw + (acct.duelLosses or 0) * DUEL_POINTS.loss)
     acct.challengeXP = acct.challengeXP or 0
     acct.done = acct.done or {}
     acct.stats = acct.stats or {}
@@ -667,7 +697,7 @@ local function Me()
     local me = { total = 0, week = 0, weekId = wid, deaths = 0, rate = { jumps = 0, seconds = 0 },
         challengeXP = acct.challengeXP + (acct.duelXP or 0) + (acct.crownXP or 0) + (acct.dailyXP or 0),
         prestige = acct.prestige, prestigeSpent = acct.prestigeSpent, done = acct.done,
-        duelWins = acct.duelWins or 0, faction = MyFaction(),
+        duelWins = acct.duelWins or 0, duelPoints = acct.duelPoints or 0, faction = MyFaction(),
         hourId = acct.hourId, hour = acct.hour, crowns = acct.crowns or 0,
         class = charData.class, display = charData.display }
     for _, c in pairs(JumpCounterDB.chars) do
@@ -865,6 +895,7 @@ function ScoreMessage()
         .. ":" .. (acct.duelLosses or 0) .. ":" .. (acct.duelDraws or 0)
         .. ":" .. CurrentHourId() .. ":" .. HourCount(me) .. ":" .. (acct.crowns or 0)
         .. ":" .. (acct.prestigeSpent or 0)                     -- 1.8.2: XP used by prestige stars
+        .. ":" .. (acct.duelPoints or 0)                        -- 1.8.2: duel rank points
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -1034,7 +1065,7 @@ do
             -- 1.7.3: after the hop count, so older versions ignore them
             n(data.duelLosses), n(data.duelDraws),
             n(data.hourId), n(data.hour), n(data.crowns),          -- 1.8.0
-            n(data.prestigeSpent) }, ":")                           -- 1.8.2
+            n(data.prestigeSpent), n(data.duelPoints) }, ":")       -- 1.8.2
     end
 
     -- Up to RELAY_BATCH passable scores (newest first) that pass filter(data).
@@ -1111,7 +1142,7 @@ do
     function ApplyRelay(msg, via)
         local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
             rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws,
-            rHourId, rHour, rCrowns, rSpent = strsplit(":", msg)
+            rHourId, rHour, rCrowns, rSpent, rPoints = strsplit(":", msg)
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
@@ -1149,7 +1180,7 @@ do
         entry.prestige, entry.duelWins = num(rPrestige), num(rDuels)
         entry.duelLosses, entry.duelDraws = num(rLosses), num(rDraws)   -- nil before 1.7.3
         entry.hourId, entry.hour, entry.crowns = num(rHourId), num(rHour), num(rCrowns)   -- 1.8.0
-        entry.prestigeSpent = num(rSpent)                                                -- 1.8.2
+        entry.prestigeSpent, entry.duelPoints = num(rSpent), num(rPoints)               -- 1.8.2
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
         entry.hops = tonumber(rHops) or RELAY_MAX_HOPS
@@ -1214,7 +1245,7 @@ local function HandleMessage(msg, key, display, reply, via)
     end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
         charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction,
-        duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent = strsplit(":", msg)
+        duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent, duelPoints = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -1291,7 +1322,8 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.hourId = tonumber(hourId)           -- these three are nil before 1.8.0
         entry.hour = tonumber(hourCount)
         entry.crowns = tonumber(crowns)
-        entry.prestigeSpent = tonumber(prestigeSpent)   -- nil before 1.8.2
+        entry.prestigeSpent = tonumber(prestigeSpent)   -- these two are nil before 1.8.2
+        entry.duelPoints = tonumber(duelPoints)
         entry.via, entry.hops = via, 0            -- heard directly
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
@@ -1965,16 +1997,6 @@ do
     function Daily.OnDeath()
         State().run = 0
     end
-
-    -- Once a day, a short chat line about the new challenges.
-    function Daily.Announce()
-        local d = State()
-        if d.announced or not settings.myProgress then return end
-        d.announced = true
-        local parts = {}
-        for _, e in ipairs(Today()) do table.insert(parts, e.tier.color .. e.def.desc .. "|r") end
-        Print("Today's challenges: " .. table.concat(parts, "  ") .. " |cff999999(/jumps challenges)|r")
-    end
 end
 
 -- Longest run of consecutive days in a set of "YYYY-MM-DD" keys.
@@ -2198,25 +2220,43 @@ do
             return
         end
         local me, them = d.mine, d.theirs
-        local xp, text, short = DUEL_PLAY_XP
+        local xp, text, short, points = DUEL_PLAY_XP
+        local rankBefore = DuelRank(acct.duelPoints)
+        local comeback = false
         if me > them then
             acct.duelWins = (acct.duelWins or 0) + 1
-            xp = DUEL_WIN_XP
-            text = ("You won the jump duel against %s, %d - %d! (+%d XP)"):format(opp, me, them, xp)
+            acct.lossStreak = 0
+            xp, points = DUEL_WIN_XP, DUEL_POINTS.win
+            text = ("You won the jump duel against %s, %d - %d! (+%d XP, +%d duel points)"):format(opp, me, them, xp, points)
             short = "|cff33ff33You won!|r"
         elseif me < them then
             acct.duelLosses = (acct.duelLosses or 0) + 1
-            text = ("%s won the jump duel, %d - %d. (+%d XP for playing)"):format(opp, them, me, xp)
-            short = "|cffff5555You lost|r"
+            acct.lossStreak = (acct.lossStreak or 0) + 1
+            points = DUEL_POINTS.loss
+            comeback = acct.lossStreak % DUEL_POINTS.comebackEvery == 0
+            text = ("%s won the jump duel, %d - %d. (+%d XP, +%d duel points for playing)"):format(opp, them, me, xp, points)
+            short = "Good fight!"
         else
             acct.duelDraws = (acct.duelDraws or 0) + 1
-            text = ("The jump duel against %s is a draw, %d - %d! (+%d XP)"):format(opp, me, them, xp)
+            acct.lossStreak = 0
+            points = DUEL_POINTS.draw
+            text = ("The jump duel against %s is a draw, %d - %d! (+%d XP, +%d duel points)"):format(opp, me, them, xp, points)
             short = "Draw!"
         end
         if not d.oppFinal then text = text .. " |cff999999(their last known score)|r" end
         acct.duelXP = (acct.duelXP or 0) + xp
+        acct.duelPoints = (acct.duelPoints or 0) + points
         dirty = true
         Notify(GOLD:format(text), true)
+        if comeback then
+            acct.duelPoints = acct.duelPoints + DUEL_POINTS.comeback
+            Notify(GOLD:format(("Tough luck! +%d bonus duel points for not giving up.")
+                :format(DUEL_POINTS.comeback)))
+        end
+        local rankAfter = DuelRank(acct.duelPoints)
+        if rankAfter ~= rankBefore then
+            Notify(GOLD:format(("Duel rank up: %s!"):format(rankAfter)), true)
+        end
         EndDuel(d, short)
         CheckChallenges()
         RefreshBoardSoon()
@@ -2765,15 +2805,12 @@ local function ShowEntryTooltip(owner, entry)
     line("Deaths", data.deaths and Fmt(data.deaths) or "?")
     local challenges = isMe and CountCompleted(acct) or data.challenges
     line("Challenges", challenges and ("%d / %d"):format(challenges, #CHALLENGES) or "?")
-    if isMe then
-        line("Jump duels", ("%d won, %d lost, %d draws"):format(acct.duelWins or 0,
-            acct.duelLosses or 0, acct.duelDraws or 0))
-    elseif data.duelWins and data.duelLosses then          -- 1.7.3+
-        line("Jump duels", ("%d won, %d lost, %d draws"):format(data.duelWins,
-            data.duelLosses, data.duelDraws or 0))
-    elseif data.duelWins then                              -- older versions only send wins
-        line("Jump duels won", tostring(data.duelWins))
+    local points = isMe and (acct.duelPoints or 0) or data.duelPoints
+    if points then                                         -- 1.8.2+
+        line("Duel rank", ("%s |cff999999(%d pts)|r"):format(DuelRank(points), points))
     end
+    local wins = isMe and (acct.duelWins or 0) or data.duelWins
+    if wins then line("Duels won", tostring(wins)) end
 
     -- Characters on the account (from 1.1.0; older versions count one character).
     local chars
@@ -2978,8 +3015,11 @@ local function BuildOverviewTab(page, width)
           tip = "Three new challenges every day - easy, medium and hard - for extra XP. See the Challenges tab." },
         { label = "Crowns won", get = function() return Fmt(acct.crowns or 0) end,
           tip = "Hours you finished with the most jumps of everyone you can see." },
-        { label = "Jump duels", get = function()
-            return ("%d won, %d lost, %d draws"):format(acct.duelWins or 0, acct.duelLosses or 0, acct.duelDraws or 0) end },
+        { label = "Duel rank", get = function()
+            local title, nextTitle, nextAt = DuelRank(acct.duelPoints)
+            return ("%s |cff999999(%d wins)|r"):format(title, acct.duelWins or 0) end,
+          tip = "Duel points: a win +20, a draw +10, a loss +5 for playing - and every 3rd loss in a row "
+              .. "+15 extra. Points never go down." },
         { label = "Prestige", get = function()
             local p = EntryPrestige(me)
             return p > 0 and (PrestigeTag(p)) or GRAY:format("at level " .. PRESTIGE_LEVEL) end },
@@ -3032,17 +3072,19 @@ end
 -- header to sort by it.
 ---------------------------------------------------------------------------
 local BOARD_COLUMNS = {
-    { label = "#",        width = 30,  justify = "RIGHT" },
-    { label = "Player",   width = 178, justify = "LEFT" },
-    { label = "Level",    width = 64,  justify = "LEFT",  sort = "level",
+    { label = "#",        width = 28,  justify = "RIGHT" },
+    { label = "Player",   width = 152, justify = "LEFT" },
+    { label = "Level",    width = 58,  justify = "LEFT",  sort = "level",
       tip = "Jump level (and prestige stars). Sorts by total XP." },
-    { label = "Jumps",    width = 72,  justify = "RIGHT", sort = "all",    tip = "All-time jumps." },
-    { label = "Hour",     width = 54,  justify = "RIGHT", sort = "hour",
+    { label = "Jumps",    width = 70,  justify = "RIGHT", sort = "all",    tip = "All-time jumps." },
+    { label = "Hour",     width = 50,  justify = "RIGHT", sort = "hour",
       tip = "Jumps this hour. The most holds the crown." },
-    { label = "Week",     width = 64,  justify = "RIGHT", sort = "week",   tip = "Jumps this week." },
-    { label = "Per hour", width = 66,  justify = "RIGHT", sort = "rate",
+    { label = "Week",     width = 60,  justify = "RIGHT", sort = "week",   tip = "Jumps this week." },
+    { label = "Per hour", width = 62,  justify = "RIGHT", sort = "rate",
       tip = "Jumps per hour of online time, last 7 days." },
-    { label = "Deaths",   width = 58,  justify = "RIGHT", sort = "deaths" },
+    { label = "Deaths",   width = 52,  justify = "RIGHT", sort = "deaths" },
+    { label = "Duels",    width = 52,  justify = "RIGHT", sort = "duels",
+      tip = "Jump duels won. Sorts by duel rank (hover a player to see it)." },
 }
 
 -- Everyone on the board with every column's value, sorted by one of them.
@@ -3054,7 +3096,8 @@ local function BuildTable(sort)
         table.insert(rows, { key = key, data = data, class = data.class, total = data.total or 0, mine = mine,
             all = data.total or 0, hour = HourCount(data),
             week = (wid and data.weekId == wid) and (data.week or 0) or 0,
-            rate = JumpsPerHour(data), level = EntryXP(data), deaths = data.deaths })
+            rate = JumpsPerHour(data), level = EntryXP(data), deaths = data.deaths,
+            duels = data.duelPoints, duelWins = data.duelWins })
     end
     add(playerKey, Me(), true)
     local byName = {}
@@ -3190,6 +3233,7 @@ local function BuildLeaderboardTab(page, width)
             c[6]:SetText(num(entry.week, "week"))
             c[7]:SetText(entry.rate and num(entry.rate, "rate") or GRAY:format("-"))
             c[8]:SetText(num(entry.deaths, "deaths"))
+            c[9]:SetText(entry.duels and num(entry.duelWins or 0, "duels") or GRAY:format("-"))
         end
         return row
     end
@@ -3271,6 +3315,7 @@ local function BuildLeaderboardTab(page, width)
                 or "weeks start Monday 00:00 UTC",
             rate = "last 7 days of online time, not AFK",
             level = "XP = jumps + challenge, duel and crown rewards",
+            duels = "duel rank points: win +20, draw +10, loss +5",
         })[mode] or "click a column to sort - hover a player for details"
         self.footer:SetText(count .. "  -  " .. note)
     end
@@ -3987,7 +4032,6 @@ events:SetScript("OnEvent", function(_, event, ...)
         -- Updated since we last saw a newer version? Then forget it.
         if JumpCounterDB.newestVersion and not NewestVersion() then JumpCounterDB.newestVersion = nil end
         C_Timer.After(5, ShowUpdateNotice)
-        C_Timer.After(7, function() Daily.Announce() end)
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
         CreateCounterFrame()
         CreateMainFrame()

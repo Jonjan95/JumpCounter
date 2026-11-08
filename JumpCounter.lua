@@ -3167,8 +3167,9 @@ local BOARD_COLUMNS = {
     { label = "Avg / hour", width = 66,  justify = "RIGHT", sort = "rate",
       tip = "Average jumps per hour of online time over the last 7 days (time flagged AFK doesn't count)." },
     { label = "Deaths",     width = 48,  justify = "RIGHT", sort = "deaths" },
-    { label = "Duels",      width = 48,  justify = "RIGHT", sort = "duels",
-      tip = "Jump duels won. Sorts by duel rank (hover a player to see it)." },
+    { label = "Duel rank",  width = 140, justify = "LEFT",  sort = "duels",
+      tip = "Duel rank and duel points: a win +20, a draw +10, a loss +5 for playing, "
+          .. "and every 3rd loss in a row +15 extra. Points never go down." },
 }
 
 -- Everyone on the board with every column's value, sorted by one of them.
@@ -3320,7 +3321,13 @@ local function BuildLeaderboardTab(page, width)
             c[7]:SetText(num(entry.week, "week"))
             c[8]:SetText(entry.rate and num(entry.rate, "rate") or GRAY:format("-"))
             c[9]:SetText(num(entry.deaths, "deaths"))
-            c[10]:SetText(entry.duels and num(entry.duelWins or 0, "duels") or GRAY:format("-"))
+            if entry.duels then
+                local rank = DuelRank(entry.duels)
+                c[10]:SetText(((sort == "duels") and "|cffffffff" or "|cffc8c8c8") .. rank .. "|r "
+                    .. GRAY:format(Fmt(entry.duels)))
+            else
+                c[10]:SetText(GRAY:format("-"))
+            end
         end
         return row
     end
@@ -3698,7 +3705,7 @@ local TABS = {
 }
 
 local function CreateMainFrame()
-    local W, H = 760, 520
+    local W, H = 850, 520
     local f
     if HasTemplate("ButtonFrameTemplate") then
         f = CreateFrame("Frame", "JumpCounterMain", UIParent, "ButtonFrameTemplate")

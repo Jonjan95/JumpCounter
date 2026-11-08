@@ -30,7 +30,7 @@ OPEN IT
     Overview     your jump level, rank, next rank, XP bar and all your
                  numbers. A "Prestige!" button appears here at level 50.
     Leaderboard  everyone you can see: level, title, total jumps, this hour,
-                 this week, average per hour, deaths and duels won. Click
+                 this week, average per hour, deaths and duel rank. Click
                  a column header to sort by it,
                  hover a player for all their details. Your own row is
                  always shown at the bottom.
@@ -88,7 +88,7 @@ JUMP DUELS
   a loss +5 for playing, plus a bonus when luck isn't on your side.
   Points never go down, and they move you up through the duel ranks.
   Others see your rank and wins (hover your name, or sort the
-  leaderboard by the Duels column).
+  leaderboard by the Duel rank column).
 
 THE CROWN
   Whoever jumps the most in the current hour holds the crown (shown next

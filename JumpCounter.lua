@@ -4,7 +4,12 @@
 local ADDON_NAME = ...
 local PREFIX = "JumpCounter"      -- addon message prefix (max 16 chars)
 local BROADCAST_INTERVAL = 30     -- seconds between automatic score broadcasts
-local JUMP_DEBOUNCE = 0.25        -- ignore presses closer together than this
+-- A normal jump on flat ground keeps you in the air for about 0.82 s (jump
+-- speed ~7.96 yd/s, gravity ~19.29 yd/s^2). Counted jumps on land must be at
+-- least this far apart, so tiny hops (e.g. jumping into a wall and getting
+-- "stuck") can't be spammed faster than real jumps. A little under the full
+-- air time so continuous bunny-hopping never loses a jump to frame timing.
+local JUMP_MIN_INTERVAL = 0.75
 local SWIM_JUMP_COOLDOWN = 0.6    -- min seconds between counted jumps in water
 local PEER_EXPIRY_DAYS = 60       -- drop players not heard from in this long
 local BOARD_ROWS = 15             -- visible rows; the list scrolls
@@ -1660,25 +1665,27 @@ end
 
 ---------------------------------------------------------------------------
 -- Jump duels: now and then two players who are jumping around are paired
--- for a 3-minute jump-off. Whoever jumps most wins, and everyone online
+-- for a 2-minute jump-off. Whoever jumps most wins, and everyone online
 -- with the addon sees the result.
 --
 -- Messages (sent like scores: guild, group and friends who use the addon):
---   DQ:<id>:<start>:<acct>:<name>:<class>:<target acct>:<manual>  invite
+--   DQ:<id>:<start>:<acct>:<name>:<class>:<target acct>:<manual>:<length>  invite
 --   DA:<id>:<acct>                                              accept
 --   DG:<id>:<start>:<acct>:<name>:<class>:<acct>:<name>:<class>  go (from the inviter)
 --   DP:<id>:<acct>:<count>                                       progress
 --   DF:<id>:<acct>:<name>:<class>:<count>                        final count
--- Times are server times, so both players count the same 3 minutes.
+-- Times are server times, so both players count the same seconds. The
+-- invite says how long the duel is (1.5.0/1.6.0 invites don't: 3 minutes).
 ---------------------------------------------------------------------------
 local DuelOnJump, CreateDuelFrame, MaybeStartRandomDuel, DuelCommand
 do
-    local DUEL_LENGTH = 180
+    local DUEL_LENGTH = 120
+    local OLD_DUEL_LENGTH = 180       -- invites from 1.5.0 / 1.6.0
     local DUEL_LEAD = 15              -- seconds from invite to start (countdown)
     local DUEL_COOLDOWN = 1800        -- at most one random duel per 30 minutes each
     local DUEL_CHANCE = 1 / 90        -- chance per minute to start one (~every 1.5 h)
     local DUEL_ACTIVE = 300           -- opponents must have jumped in the last 5 min
-    local DUEL_MIN_VERSION = "1.5.0"
+    local DUEL_MIN_VERSION = "1.7.0"   -- older versions would count 3 minutes
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
 
     local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, ... }
@@ -1829,8 +1836,9 @@ do
 
     local function AnnounceDuelStart()
         local now = GetServerTime()
-        Notify(GOLD:format(("JUMP DUEL vs %s! Most jumps in 3 minutes wins - starts in %d seconds!")
-            :format(ClassColored(duel.opp.name, duel.opp.class), math.max(0, duel.start - now))), true)
+        Notify(GOLD:format(("JUMP DUEL vs %s! Most jumps in %d minutes wins - starts in %d seconds!")
+            :format(ClassColored(duel.opp.name, duel.opp.class), math.floor((duel.finish - duel.start) / 60 + 0.5),
+            math.max(0, duel.start - now))), true)
         UpdateDuelFrame(now)
     end
 
@@ -1844,7 +1852,7 @@ do
         duel = { id = acct.id .. now, start = start, finish = start + DUEL_LENGTH, state = "invited",
             opp = opp, mine = 0, theirs = 0, manual = manual }
         SendDuel("DQ", duel.id, start, acct.id, Clean(MyDuelName()), charData.class,
-            opp.acct, manual and "1" or "")
+            opp.acct, manual and "1" or "", DUEL_LENGTH)
         StartDuelTicker()
         return opp
     end
@@ -1854,11 +1862,13 @@ do
         local now = GetServerTime()
         if not id or id == "" then return end
         if tag == "DQ" then
-            -- Invite: a1 start, a2 their acct, a3 name, a4 class, a5 target acct, a6 manual
+            -- Invite: a1 start, a2 their acct, a3 name, a4 class, a5 target acct, a6 manual, a7 length
             local start = tonumber(a1)
+            local length = tonumber(a7) or OLD_DUEL_LENGTH
+            if length < 30 or length > 600 then return end
             if a5 ~= acct.id or a2 == acct.id or not start then return end
             if not CanDuel(now, a6 == "1") or start - now < 5 or start - now > 60 then return end
-            duel = { id = id, start = start, finish = start + DUEL_LENGTH, state = "accepted",
+            duel = { id = id, start = start, finish = start + length, state = "accepted",
                 opp = { acct = a2, name = a3, class = (a4 ~= "" and a4) or nil }, mine = 0, theirs = 0 }
             SendDuel("DA", id, acct.id)
             StartDuelTicker()
@@ -1873,9 +1883,9 @@ do
             -- Go: a1 start, a2/a3/a4 inviter, a5/a6/a7 invited
             local start = tonumber(a1)
             if not start then return end
-            busyUntil[a2], busyUntil[a5] = start + DUEL_LENGTH, start + DUEL_LENGTH
+            busyUntil[a2], busyUntil[a5] = start + OLD_DUEL_LENGTH, start + OLD_DUEL_LENGTH
             if duel and duel.id == id and duel.state == "accepted" then
-                duel.state, duel.start, duel.finish = "on", start, start + DUEL_LENGTH
+                duel.state, duel.finish, duel.start = "on", start + (duel.finish - duel.start), start
                 AnnounceDuelStart()
             end
         elseif tag == "DP" then
@@ -1985,10 +1995,18 @@ end
 -- Track whether we were on the ground on the previous frame instead.
 local wasGrounded = true
 local wasSwimming = false
+local debugMode = false
+local jumpStartedAt               -- debug: when the last land jump left the ground
 local groundTracker = CreateFrame("Frame")
 groundTracker:SetScript("OnUpdate", function()
     wasSwimming = IsSwimming() and true or false
-    wasGrounded = not (IsFalling() or wasSwimming or IsFlying() or UnitOnTaxi("player"))
+    local grounded = not (IsFalling() or wasSwimming or IsFlying() or UnitOnTaxi("player"))
+    -- /jumps debug: report how long each jump was in the air.
+    if debugMode and jumpStartedAt and grounded and not wasGrounded then
+        Print(("debug: landed after %.2f s in the air"):format(GetTime() - jumpStartedAt))
+        jumpStartedAt = nil
+    end
+    wasGrounded = grounded
 end)
 
 -- Is the breath bar draining? That only happens while under the surface.
@@ -2006,13 +2024,11 @@ local function IsUnderwater()
     return IsBreathDraining()
 end
 
-local debugMode = false
-
 local function OnJump()
     if debugMode then
-        Print(("debug: falling=%s swimming=%s grounded=%s submerged=%s breath=%s"):format(
+        Print(("debug: falling=%s swimming=%s grounded=%s breath=%s - %.2f s since last counted jump"):format(
             tostring(IsFalling()), tostring(IsSwimming()), tostring(wasGrounded),
-            IsSubmerged and tostring(IsSubmerged()) or "n/a", tostring(IsBreathDraining())))
+            tostring(IsBreathDraining()), GetTime() - lastJumpTime))
     end
     if UnitOnTaxi("player") or IsFlying() then return end
     local now = GetTime()
@@ -2027,7 +2043,9 @@ local function OnJump()
         -- On land: only count jumps that start from the ground (no mid-air spam).
         if not wasGrounded then return end
         wasGrounded = false
-        if now - lastJumpTime < JUMP_DEBOUNCE then return end
+        if debugMode then jumpStartedAt = now end
+        -- Too soon after the last counted jump to be a full jump.
+        if now - lastJumpTime < JUMP_MIN_INTERVAL then return end
     end
     lastJumpTime = now
 
@@ -2597,7 +2615,7 @@ local function BuildSettingsTab(page, width)
 
     Section("Jump duels & sound")
     SettingCheck("duels", "Random jump duels",
-        "Now and then you're paired with another player who is jumping around for a 3-minute "
+        "Now and then you're paired with another player who is jumping around for a 2-minute "
         .. "jump-off. Most jumps wins. At most one random duel every 30 minutes.")
     SettingCheck("duelNews", "Other players' duel results",
         "A chat line with the result when two other players finish a jump duel.")

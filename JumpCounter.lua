@@ -2565,8 +2565,10 @@ local function ShowEntryTooltip(owner, entry)
     end
     if not isMe and data.seen then
         local ago = time() - data.seen
+        local how = (data.hops or 0) > 0 and "via friends"
+            or ({ GUILD = "guild", BNET = "Battle.net", WHISPER = "friend", GROUP = "group" })[data.via or ""]
         line("Last update", (ago < 60 and "just now" or (FormatDuration(ago) .. " ago"))
-            .. ((data.hops or 0) > 0 and " (via friends)" or ""))
+            .. (how and (" (" .. how .. ")") or ""))
     end
     GameTooltip:Show()
 end

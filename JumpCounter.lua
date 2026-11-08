@@ -923,10 +923,12 @@ end
 -- Battle.net friend. Scores are passed on at most twice (hops), only if
 -- updated in the last RELAY_MAX_AGE, and in small batches:
 --  * to a friend (whisper / Battle.net) whenever we hear from them (at most
---    once a minute, and every 10 minutes anyway): only scores they haven't
---    had from us yet, or that changed since we last sent them (RELAY_RESEND);
---  * to the guild, only scores that didn't come from the guild, at most
---    every RELAY_GUILD_INTERVAL, skipping what someone else already sent.
+--    once a minute, and every minute while we've heard from them lately):
+--    only scores they haven't had from us yet, or that changed (RELAY_RESEND;
+--    RELAY_LIVE when their jumps this hour changed - the crown race);
+--  * to the guild, only scores that didn't come from the guild: everything
+--    every RELAY_GUILD_INTERVAL, changed hour counts every RELAY_LIVE,
+--    skipping what someone else already sent.
 -- R:<acct>:<key>:<name>:<class>:<faction>:<total>:<weekId>:<week>:<deaths>
 --  :<char level>:<xp>:<challenges>:<jph>:<prestige>:<duel wins>:<version>:<seen>:<hops>
 ---------------------------------------------------------------------------
@@ -940,9 +942,22 @@ do
     local RELAY_BATCH = 40
     local RELAY_CONTACT_GAP = 60      -- at most one batch a minute per friend
     local RELAY_RESEND = 600          -- resend a score to a friend at most every 10 min
-    local contacts = {}               -- [contact key] = { last, reply, acct, sent = { [acct] = seen } }
+    -- 1.8.1: a score whose jumps this hour changed goes out again after
+    -- 90 s, so the crown race is close to live for friends of friends too.
+    -- Scores that don't change keep the slow 10-minute pace.
+    local RELAY_LIVE = 90
+    local CONTACT_QUIET = 900         -- stop sending to friends not heard from in 15 min
+    local contacts = {}               -- [contact key] = { last, heard, reply, acct, sent = { [acct] = seen }, sentHour = {} }
     local guildRelayed = {}           -- [acct] = newest "seen" already passed around the guild
+    local guildHour = {}              -- [acct] = jumps this hour last passed around the guild
     local lastGuildRelay = -RELAY_GUILD_INTERVAL
+    local lastGuildFull = -RELAY_GUILD_INTERVAL
+
+    -- Jumps this hour changed since we last passed this score on?
+    local function HourChanged(d, sentHour, sentSeen)
+        return d.hourId == CurrentHourId() and (d.hour or 0) > 0 and d.hour ~= sentHour
+            and (d.seen or 0) - (sentSeen or 0) >= RELAY_LIVE
+    end
 
     local function NoColon(v) return (tostring(v or ""):gsub(":", "")) end
 
@@ -974,44 +989,57 @@ do
 
     -- A friend we heard from directly: tell them who we know that they
     -- haven't heard about from us yet (or not for a while).
-    function RelayToContact(contactKey, reply, contactAcct)
+    -- fromTick = called by RelayTick, not because they just sent us something.
+    function RelayToContact(contactKey, reply, contactAcct, fromTick)
         local c = contacts[contactKey]
         if not c then
-            c = { last = -RELAY_CONTACT_GAP, sent = {} }
+            c = { last = -RELAY_CONTACT_GAP, sent = {}, sentHour = {} }
             contacts[contactKey] = c
         end
         c.reply, c.acct = reply, contactAcct
+        if not fromTick then c.heard = GetTime() end
         if GetTime() - c.last < RELAY_CONTACT_GAP then return end
         c.last = GetTime()
         local batch = RelayBatch(function(d)
             if d.acct == contactAcct then return false end
             local sentSeen = c.sent[d.acct]
             return not sentSeen or (d.seen or 0) - sentSeen >= RELAY_RESEND
+                or HourChanged(d, c.sentHour[d.acct], sentSeen)
         end)
         for _, e in ipairs(batch) do
             c.sent[e.data.acct] = e.data.seen
+            c.sentHour[e.data.acct] = e.data.hour
             reply(RelayMessage(e.key, e.data))
         end
     end
 
     -- Tell the guild about players it can't hear itself.
+    -- Every 10 minutes everything new; in between (every 90 s at most) only
+    -- scores whose jumps this hour changed.
     function RelayToGuild()
-        if not IsInGuild() or GetTime() - lastGuildRelay < RELAY_GUILD_INTERVAL then return end
+        if not IsInGuild() or GetTime() - lastGuildRelay < RELAY_LIVE then return end
         lastGuildRelay = GetTime()
+        local full = GetTime() - lastGuildFull >= RELAY_GUILD_INTERVAL
+        if full then lastGuildFull = GetTime() end
         local batch = RelayBatch(function(d)
-            return d.via ~= "GUILD" and (guildRelayed[d.acct] or 0) < (d.seen or 0)
+            if d.via == "GUILD" or (guildRelayed[d.acct] or 0) >= (d.seen or 0) then return false end
+            return full or HourChanged(d, guildHour[d.acct], guildRelayed[d.acct])
         end)
         for _, e in ipairs(batch) do
             guildRelayed[e.data.acct] = e.data.seen
+            guildHour[e.data.acct] = e.data.hour
             Enqueue(RelayMessage(e.key, e.data), "GUILD")
         end
     end
 
-    -- Every 10 minutes: the guild, and friends who've gone quiet.
+    -- Every minute: the guild, and friends we've heard from lately (also
+    -- the ones who stopped jumping, so they still get others' news).
     function RelayTick()
         RelayToGuild()
         for key, c in pairs(contacts) do
-            if c.reply then RelayToContact(key, c.reply, c.acct) end
+            if c.reply and GetTime() - (c.heard or 0) < CONTACT_QUIET then
+                RelayToContact(key, c.reply, c.acct, true)
+            end
         end
     end
 
@@ -1022,7 +1050,11 @@ do
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
-        if via == "GUILD" then guildRelayed[rAcct] = math.max(guildRelayed[rAcct] or 0, rSeen) end
+        if via == "GUILD" then
+            -- Someone else already passed this around the guild.
+            guildRelayed[rAcct] = math.max(guildRelayed[rAcct] or 0, rSeen)
+            if tonumber(rHourId) == CurrentHourId() then guildHour[rAcct] = tonumber(rHour) end
+        end
         rSeen = math.min(rSeen, time())             -- other computers' clocks may run ahead
         if time() - rSeen > RELAY_MAX_AGE then return end
 
@@ -3342,10 +3374,11 @@ events:SetScript("OnEvent", function(_, event, ...)
         CreateDuelFrame()
         C_Timer.NewTicker(60, MaybeStartRandomDuel)
         C_Timer.NewTicker(5, CrownTick)
-        -- Pass scores from outside the guild on to the guild now and then
-        -- (random delay so guild members don't all send at once).
-        C_Timer.NewTicker(RELAY_GUILD_INTERVAL, function()
-            C_Timer.After(math.random() * 120, RelayTick)
+        -- Pass scores on to the guild and quiet friends every minute (random
+        -- delay so guild members don't all send at once). Most minutes there's
+        -- nothing new to send.
+        C_Timer.NewTicker(60, function()
+            C_Timer.After(math.random() * 30, RelayTick)
         end)
 
         C_Timer.NewTicker(BROADCAST_INTERVAL, function()

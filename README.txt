@@ -70,7 +70,7 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
 
 JUMP DUELS
   Now and then two players who are jumping around get paired for a
-  2-minute jump duel: a small window counts down and shows both scores,
+  1-minute jump duel: a small window counts down and shows both scores,
   and whoever jumps most wins bonus XP. Everyone online with the addon
   sees the result in chat. At most one random duel every 30 minutes;
   turn them off (or the results of others' duels) in Settings.

@@ -1747,7 +1747,7 @@ end
 
 ---------------------------------------------------------------------------
 -- Jump duels: now and then two players who are jumping around are paired
--- for a 2-minute jump-off. Whoever jumps most wins, and everyone online
+-- for a 1-minute jump-off. Whoever jumps most wins, and everyone online
 -- with the addon sees the result.
 --
 -- Messages (sent like scores: guild, group and friends who use the addon):
@@ -1761,7 +1761,7 @@ end
 ---------------------------------------------------------------------------
 local DuelOnJump, CreateDuelFrame, MaybeStartRandomDuel, DuelCommand
 do
-    local DUEL_LENGTH = 120
+    local DUEL_LENGTH = 60            -- 1.8.0: 1 minute (120 s in 1.7.x - the invite says which)
     local OLD_DUEL_LENGTH = 180       -- invites from 1.5.0 / 1.6.0
     local DUEL_LEAD = 15              -- seconds from invite to start (countdown)
     local DUEL_COOLDOWN = 1800        -- at most one random duel per 30 minutes each
@@ -1929,8 +1929,12 @@ do
 
     local function AnnounceDuelStart()
         local now = GetServerTime()
-        Notify(GOLD:format(("JUMP DUEL vs %s! Most jumps in %d minutes wins - starts in %d seconds!")
-            :format(ClassColored(duel.opp.name, duel.opp.class), math.floor((duel.finish - duel.start) / 60 + 0.5),
+        local length = duel.finish - duel.start
+        local lengthText = length % 60 == 0
+            and (length == 60 and "1 minute" or ("%d minutes"):format(length / 60))
+            or ("%d seconds"):format(length)
+        Notify(GOLD:format(("JUMP DUEL vs %s! Most jumps in %s wins - starts in %d seconds!")
+            :format(ClassColored(duel.opp.name, duel.opp.class), lengthText,
             math.max(0, duel.start - now))), true)
         UpdateDuelFrame(now)
     end
@@ -2710,7 +2714,7 @@ local function BuildSettingsTab(page, width)
 
     Section("Jump duels & sound")
     SettingCheck("duels", "Random jump duels",
-        "Now and then you're paired with another player who is jumping around for a 2-minute "
+        "Now and then you're paired with another player who is jumping around for a 1-minute "
         .. "jump-off. Most jumps wins. At most one random duel every 30 minutes.")
     SettingCheck("duelNews", "Other players' duel results",
         "A chat line with the result when two other players finish a jump duel.")

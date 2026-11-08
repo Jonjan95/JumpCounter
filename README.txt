@@ -1,5 +1,5 @@
-JumpCounter
-===========
+JumpingCounter
+==============
 
 Counts your jumps and deaths, gives you jump levels, ranks and challenges,
 and puts you on a leaderboard with your friends.
@@ -23,7 +23,7 @@ OPEN IT
   character's jumps. Jumps from before a character had the addon aren't
   known, and a character's deaths are added the first time you log it in.
 
-  Type /jumps, click the JumpCounter button on the minimap (drag it to
+  Type /jumps, click the JumpingCounter button on the minimap (drag it to
   move it, hide it in Settings), or use the addon menu next to the minimap.
   Everything is in that one window:
 
@@ -86,7 +86,7 @@ JUMP RANKS
   in the window - the rest are up to you to discover.
 
 COMMANDS (/jumps or /jc)
-  /jumps             open the JumpCounter window
+  /jumps             open the JumpingCounter window
   /jumps board       open it on the leaderboard
   /jumps challenges  open it on challenges
   /jumps settings    open it on settings
@@ -98,7 +98,7 @@ COMMANDS (/jumps or /jc)
   /jumps lock        lock/unlock the counter position
   /jumps share       post your total in chat
   /jumps version     your version, and who is on an older one
-  /jumps update      the download links (CurseForge and GitHub)
+  /jumps update      the CurseForge link
   /jumps duel        challenge a random player who is jumping right now
   /jumps clear       remove other players from your leaderboard
   /jumps reset       reset this character's jump count (others keep theirs)

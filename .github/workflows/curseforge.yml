@@ -62,12 +62,12 @@ jobs:
           gh release download "$TAG" --pattern '*.zip' --dir dist --repo "$GITHUB_REPOSITORY"
           zip=$(ls dist/*.zip | head -n 1)
           changelog=$(gh release view "$TAG" --json body --jq .body --repo "$GITHUB_REPOSITORY")
-          metadata=$(jq -n --arg changelog "$changelog" --arg name "JumpCounter ${TAG#v}" --argjson versions "$ids" \
+          metadata=$(jq -n --arg changelog "$changelog" --arg name "JumpingCounter ${TAG#v}" --argjson versions "$ids" \
             '{changelog: $changelog, changelogType: "markdown", displayName: $name,
               gameVersions: $versions, releaseType: "release"}')
 
           if [ "$DRY_RUN" = "true" ]; then
-            echo "Dry run: token works. Would upload $zip as 'JumpCounter ${TAG#v}' for $game_version."
+            echo "Dry run: token works. Would upload $zip as 'JumpingCounter ${TAG#v}' for $game_version."
             exit 0
           fi
 

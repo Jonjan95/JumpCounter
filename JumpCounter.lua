@@ -48,7 +48,7 @@ local GetMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 local VERSION = GetMetadata(ADDON_NAME, "Version") or "0"
 
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99JumpCounter|r: " .. msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99JumpingCounter|r: " .. msg)
 end
 
 -- "1.10.0" > "1.9.2"
@@ -65,10 +65,9 @@ end
 
 ---------------------------------------------------------------------------
 -- Update notice: when someone with a newer version is seen, show a window
--- with the download links (once per session). The newest version seen is
+-- with the CurseForge link (once per session). The newest version seen is
 -- saved, so the notice also shows right after logging in.
 ---------------------------------------------------------------------------
-local DOWNLOAD_URL = "https://github.com/Jonjan95/JumpCounter/releases/latest"
 -- Unlisted project: only reachable through this link.
 local CURSEFORGE_URL = "https://www.curseforge.com/wow/addons/jumpingcounter"
 local updateShown = false
@@ -83,8 +82,9 @@ local function ShowUpdateNotice()
     local v = NewestVersion()
     if not v or updateShown then return end
     updateShown = true
-    Print(("|cffff5555JumpCounter v%s is out - you have v%s.|r Update via CurseForge (JumpingCounter): %s"
-        .. " or download it: %s"):format(v, VERSION, CURSEFORGE_URL, DOWNLOAD_URL))
+    Print(("|cffff5555New version out: v%s (you have v%s).|r Update on CurseForge: %s"
+        .. " - for automatic updates, right-click JumpingCounter in the CurseForge app > Install settings"
+        .. " > Automatic."):format(v, VERSION, CURSEFORGE_URL))
     ShowUpdateWindow(v)
 end
 
@@ -761,7 +761,9 @@ function ScoreMessage()
         jph and math.floor(jph + 0.5) or "", EntryPrestige(me), acct.id }, ":")
     -- 1.5.0: duels won, after the character list (older versions ignore it).
     -- 1.6.0: faction ("A" / "H") after that.
+    -- 1.7.3: duels lost and drawn after that.
     local suffix = ":" .. (acct.duelWins or 0) .. ":" .. (MyFaction() or "")
+        .. ":" .. (acct.duelLosses or 0) .. ":" .. (acct.duelDraws or 0)
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -904,7 +906,9 @@ do
         return table.concat({ "R", data.acct, NoColon(key), NoColon(data.display), n(data.class),
             n(data.faction), n(data.total), n(data.weekId), n(data.week), n(data.deaths),
             n(data.charLevel), n(data.xp), n(data.challenges), n(data.jph), n(data.prestige),
-            n(data.duelWins), n(data.version), n(data.seen), (data.hops or 0) + 1 }, ":")
+            n(data.duelWins), n(data.version), n(data.seen), (data.hops or 0) + 1,
+            -- 1.7.3: after the hop count, so older versions ignore them
+            n(data.duelLosses), n(data.duelDraws) }, ":")
     end
 
     -- Up to RELAY_BATCH passable scores (newest first) that pass filter(data).
@@ -967,7 +971,7 @@ do
 
     function ApplyRelay(msg, via)
         local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
-            rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops = strsplit(":", msg)
+            rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws = strsplit(":", msg)
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
@@ -999,6 +1003,7 @@ do
         entry.charLevel = num(rLevel) or entry.charLevel
         entry.xp, entry.challenges, entry.jph = num(rXP), num(rChallenges), num(rJph)
         entry.prestige, entry.duelWins = num(rPrestige), num(rDuels)
+        entry.duelLosses, entry.duelDraws = num(rLosses), num(rDraws)   -- nil before 1.7.3
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
         entry.hops = tonumber(rHops) or RELAY_MAX_HOPS
@@ -1062,7 +1067,8 @@ local function HandleMessage(msg, key, display, reply, via)
         return
     end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
-        charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction = strsplit(":", msg)
+        charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction,
+        duelLosses, duelDraws = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -1134,6 +1140,8 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.characters = (characters and characters ~= "") and characters or nil
         entry.duelWins = tonumber(duelWins)       -- nil before 1.5.0
         entry.faction = (faction == "A" or faction == "H") and faction or entry.faction   -- 1.6.0
+        entry.duelLosses = tonumber(duelLosses)   -- these two are nil before 1.7.3
+        entry.duelDraws = tonumber(duelDraws)
         entry.via, entry.hops = via, 0            -- heard directly
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
@@ -1229,7 +1237,7 @@ local BACKDROP = {
 }
 
 ---------------------------------------------------------------------------
--- Update window: a new version is out, plus both download links to copy.
+-- Update window: a new version is out, plus the CurseForge link to copy.
 ---------------------------------------------------------------------------
 do
     local frame
@@ -1259,7 +1267,7 @@ do
     local function Create()
         local W = 460
         local f = CreateFrame("Frame", "JumpCounterUpdateFrame", UIParent, "BackdropTemplate")
-        f:SetSize(W, 268)
+        f:SetSize(W, 262)
         f:SetPoint("CENTER", 0, 120)
         f:SetBackdrop(BACKDROP)
         f:SetBackdropColor(0.04, 0.04, 0.06, 0.96)
@@ -1279,20 +1287,20 @@ do
 
         local cfLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         cfLabel:SetPoint("TOPLEFT", 24, -92)
-        cfLabel:SetText("CurseForge |cff999999(JumpingCounter - one-click updates in the CurseForge app)|r")
+        cfLabel:SetText("Update on CurseForge |cff999999(JumpingCounter)|r")
         f.cf = LinkBox(f, CURSEFORGE_URL, W - 56)
         f.cf:SetPoint("TOPLEFT", cfLabel, "BOTTOMLEFT", 6, -4)
 
-        local ghLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        ghLabel:SetPoint("TOPLEFT", 24, -146)
-        ghLabel:SetText("Or download the zip yourself |cff999999(GitHub)|r")
-        f.gh = LinkBox(f, DOWNLOAD_URL, W - 56)
-        f.gh:SetPoint("TOPLEFT", ghLabel, "BOTTOMLEFT", 6, -4)
+        local auto = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        auto:SetPoint("TOP", 0, -144)
+        auto:SetWidth(W - 40)
+        auto:SetText("Want automatic updates? Right-click JumpingCounter in the "
+            .. "CurseForge app > |cffffd100Install settings|r > |cffffd100Automatic|r.")
 
         local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        hint:SetPoint("TOP", 0, -202)
+        hint:SetPoint("TOP", 0, -194)
         hint:SetWidth(W - 40)
-        hint:SetText("Click a link, press Ctrl+C and paste it in your browser.\n"
+        hint:SetText("Click the link, press Ctrl+C and paste it in your browser.\n"
             .. "After updating, type /reload (or restart the game).")
 
         local ok = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -1307,13 +1315,13 @@ do
     function ShowUpdateWindow(newer)
         frame = frame or Create()
         if newer then
-            frame.title:SetText(("JumpCounter v%s is out!"):format(newer))
+            frame.title:SetText(("JumpingCounter v%s is out!"):format(newer))
             frame.text:SetText(("You have v%s. Update to get the latest features and fixes - "
                 .. "and to keep playing with friends on the newest version."):format(VERSION))
         else
-            frame.title:SetText("Get JumpCounter")
+            frame.title:SetText("Get JumpingCounter")
             frame.text:SetText(("You have v%s, the newest version seen so far. "
-                .. "Share these links with friends:"):format(VERSION))
+                .. "Share this link with friends:"):format(VERSION))
         end
         frame:Show()
         frame.cf:SetFocus()
@@ -1353,8 +1361,8 @@ local function CreateCounterFrame()
     end)
     f:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("JumpCounter")
-        GameTooltip:AddLine("Drag to move, right-click to open JumpCounter.", 1, 1, 1)
+        GameTooltip:AddLine("JumpingCounter")
+        GameTooltip:AddLine("Drag to move, right-click to open JumpingCounter.", 1, 1, 1)
         GameTooltip:AddLine("/jumps help for commands.", 1, 1, 1)
         GameTooltip:Show()
     end)
@@ -2323,12 +2331,14 @@ local function ShowEntryTooltip(owner, entry)
     line("Deaths", data.deaths and Fmt(data.deaths) or "?")
     local challenges = isMe and CountCompleted(acct) or data.challenges
     line("Challenges", challenges and ("%d / %d"):format(challenges, #CHALLENGES) or "?")
-    local duelWins = isMe and (acct.duelWins or 0) or data.duelWins
     if isMe then
         line("Jump duels", ("%d won, %d lost, %d draws"):format(acct.duelWins or 0,
             acct.duelLosses or 0, acct.duelDraws or 0))
-    elseif duelWins then
-        line("Jump duels won", tostring(duelWins))
+    elseif data.duelWins and data.duelLosses then          -- 1.7.3+
+        line("Jump duels", ("%d won, %d lost, %d draws"):format(data.duelWins,
+            data.duelLosses, data.duelDraws or 0))
+    elseif data.duelWins then                              -- older versions only send wins
+        line("Jump duels won", tostring(data.duelWins))
     end
 
     -- Characters on the account (from 1.1.0; older versions count one character).
@@ -2675,8 +2685,8 @@ local function BuildSettingsTab(page, width)
     end
 
     Section("On screen")
-    AddCheck("Show minimap button", "The JumpCounter button on the edge of the minimap. "
-        .. "Click it to open JumpCounter, right-click for settings, drag to move it.",
+    AddCheck("Show minimap button", "The JumpingCounter button on the edge of the minimap. "
+        .. "Click it to open JumpingCounter, right-click for settings, drag to move it.",
         function() return settings.minimapButton end, SetMinimapShown)
     AddCheck("Show jump counter on screen", "The small movable window with your total.",
         function() return JumpCounterDB.ui.shown end, SetCounterShown)
@@ -2748,7 +2758,7 @@ local function CreateMainFrame()
 
     local appName = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     appName:SetPoint("TOPLEFT", PAD, -12)
-    appName:SetText("JumpCounter " .. GRAY:format("v" .. VERSION))
+    appName:SetText("JumpingCounter " .. GRAY:format("v" .. VERSION))
 
     -- Header: who you are and your level.
     local header = CreateFrame("Frame", nil, f)
@@ -2835,7 +2845,7 @@ local function CreateMainFrame()
 
     function f:RefreshHeader()
         local newer = NewestVersion()
-        appName:SetText("JumpCounter " .. GRAY:format("v" .. VERSION)
+        appName:SetText("JumpingCounter " .. GRAY:format("v" .. VERSION)
             .. (newer and ("   |cffff5555Update available: v%s - /jumps update|r"):format(newer) or ""))
         local me = Me()
         local prestige = EntryPrestige(me)
@@ -2920,23 +2930,23 @@ local function OpenOptions() ToggleMain("settings") end
 -- Esc > Options > AddOns > JumpCounter: just points to the main window.
 local function CreateOptionsPanel()
     local panel = CreateFrame("Frame")
-    panel.name = "JumpCounter"
+    panel.name = "JumpingCounter"
 
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("JumpCounter " .. GRAY:format("v" .. VERSION))
+    title:SetText("JumpingCounter " .. GRAY:format("v" .. VERSION))
 
     local text = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     text:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
     text:SetWidth(520)
     text:SetJustifyH("LEFT")
     text:SetText("Everything - your stats, the leaderboard, challenges and settings - is in the "
-        .. "JumpCounter window. Open it with /jumps or from the addon menu next to the minimap.")
+        .. "JumpingCounter window. Open it with /jumps or from the addon menu next to the minimap.")
 
     local open = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     open:SetSize(180, 26)
     open:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -14)
-    open:SetText("Open JumpCounter")
+    open:SetText("Open JumpingCounter")
     open:SetScript("OnClick", function()
         if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
         if InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() then HideUIPanel(InterfaceOptionsFrame) end
@@ -3045,7 +3055,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
             end
             Print("Name sources: " .. table.concat(names, ", ") .. " - saved: " .. tostring(charData.display)
                 .. (charData.nameSetByHand and " (set by hand)" or ""))
-            Print(("Friends confirmed using JumpCounter: whisper=%d, Battle.net=%d. Queued messages: %d")
+            Print(("Friends confirmed using JumpingCounter: whisper=%d, Battle.net=%d. Queued messages: %d")
                 :format(nWhisper, nBNet, #sendQueue))
         end
     elseif cmd == "version" then
@@ -3060,7 +3070,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
             end
         end
         Print("You have v" .. VERSION .. (newest ~= VERSION
-            and (" - |cffff5555v" .. newest .. " is out!|r Type /jumps update for the links.") or " (newest seen)"))
+            and (" - |cffff5555v" .. newest .. " is out!|r Type /jumps update for the link.") or " (newest seen)"))
         if #outdated > 0 then
             table.sort(outdated)
             Print("Players on older versions: " .. table.concat(outdated, ", "))
@@ -3078,13 +3088,13 @@ SlashCmdList.JUMPCOUNTER = function(input)
             .. " (this week: " .. MyWeekCount(me) .. ", this session: " .. sessionJumps .. ")"
             .. (title and (" - " .. title) or "")
             .. " - Deaths: " .. BreakUpLargeNumbers(me.deaths))
-        Print("/jumps - open the JumpCounter window (stats, leaderboard, challenges, settings)")
+        Print("/jumps - open the JumpingCounter window (stats, leaderboard, challenges, settings)")
         Print("/jumps board | challenges | settings - open the window on that tab")
         Print("/jumps counter - show/hide the small on-screen counter")
         Print(("/jumps prestige - reset your jump level at level %d for a prestige star"):format(PRESTIGE_LEVEL))
         Print("/jumps name <full name> - set this character's full name (if only the first shows)")
         Print("/jumps duel - challenge a random player who is jumping right now")
-        Print("/jumps update - the download links (CurseForge and GitHub)")
+        Print("/jumps update - the CurseForge link for the newest version")
         Print("/jumps minimap - show/hide the minimap button")
         Print("/jumps lock - lock/unlock counter position")
         Print("/jumps share - announce your jumps in chat")
@@ -3108,7 +3118,7 @@ end
 
 function JumpCounter_OnAddonCompartmentEnter(_, frame)
     GameTooltip:SetOwner(frame, "ANCHOR_LEFT")
-    GameTooltip:AddDoubleLine("JumpCounter", "v" .. VERSION, 1, 0.82, 0, 0.6, 0.6, 0.6)
+    GameTooltip:AddDoubleLine("JumpingCounter", "v" .. VERSION, 1, 0.82, 0, 0.6, 0.6, 0.6)
     if charData then
         local me = Me()
         GameTooltip:AddLine("Deaths: " .. BreakUpLargeNumbers(me.deaths), 1, 1, 1)
@@ -3124,7 +3134,7 @@ function JumpCounter_OnAddonCompartmentEnter(_, frame)
             BreakUpLargeNumbers(into), BreakUpLargeNumbers(need)), 1, 0.82, 0)
         GameTooltip:AddLine(("Challenges: %d / %d"):format(CountCompleted(acct), #CHALLENGES), 1, 1, 1)
     end
-    GameTooltip:AddLine("Click: open JumpCounter", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Click: open JumpingCounter", 0.8, 0.8, 0.8)
     GameTooltip:AddLine("Right-click: settings", 0.8, 0.8, 0.8)
     GameTooltip:Show()
 end

@@ -57,29 +57,17 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
   level 30 you can prestige: your level goes back to 1 and you get a star.
   Total jumps, ranks, total XP and challenges are kept.
 
-  46 challenges: mounted, swimming, ghost, combat, dungeon, group, zone,
-  session, sprint, no-death, day and week goals in several tiers, plus
-  day streaks, inns, stealth, druid forms / Ghost Wolf, battlegrounds,
-  night owl, low health, max level, different classes and prestige.
+  There are lots of challenges to find - open the Challenges tab to see
+  what you're working towards.
 
 JUMPS PER HOUR
   Jumps divided by your online time, not counting time flagged AFK. Shown
   after 30 minutes of online time (counted from v0.9.0).
 
 JUMP RANKS
-       100 Hopper            7,500 Trampoline Artist   87,500 Comet Rider
-       250 Skipper          10,000 Moon Boots         100,000 Legend of the Leap
-       500 Bunny Hopper     12,500 Bounce Baron       125,000 Starhopper
-       750 Spring Step      15,000 Cloud Hopper       150,000 Jumpmaster
-     1,000 Leapfrog         20,000 Featherfoot        200,000 Gravity's Bane
-     1,750 Cricket          25,000 Gravity Defier     250,000 Sky Sovereign
-     2,500 Kangaroo         30,000 Jet Hopper         350,000 Eclipse Leaper
-     3,250 Wallaby          35,000 Rocket Legs        500,000 Ascended
-     4,000 Jackrabbit       42,500 Skybound           750,000 Celestial
-     5,000 Pogo Master      50,000 Low Orbit        1,000,000 The Unfallen
-     6,250 Springheel       62,500 Meteor           1,500,000 Myth of the Leap
-                            75,000 Stratosphere     2,500,000 Eternal Bounce
-                                                    5,000,000 Defier of Worlds
+  Your all-time jumps earn you rank titles, from your first 100 jumps to
+  far beyond what anyone has reached yet. Only your next rank is shown
+  in the window - the rest are up to you to discover.
 
 COMMANDS (/jumps or /jc)
   /jumps             open the JumpCounter window

@@ -30,7 +30,7 @@ OPEN IT
     Overview     your jump level, rank, next rank, XP bar and all your
                  numbers. A "Prestige!" button appears here at level 50.
     Leaderboard  everyone you can see: level, title, total jumps, this hour,
-                 this week, average per hour, deaths and duel rank. Click
+                 this week, average per hour, deaths, duel rank and wins. Click
                  a column header to sort by it,
                  hover a player for all their details. Your own row is
                  always shown at the bottom.

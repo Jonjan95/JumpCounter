@@ -3170,6 +3170,7 @@ local BOARD_COLUMNS = {
     { label = "Duel rank",  width = 140, justify = "LEFT",  sort = "duels",
       tip = "Duel rank and duel points: a win +20, a draw +10, a loss +5 for playing, "
           .. "and every 3rd loss in a row +15 extra. Points never go down." },
+    { label = "Wins",       width = 46,  justify = "RIGHT", sort = "wins", tip = "Jump duels won." },
 }
 
 -- Everyone on the board with every column's value, sorted by one of them.
@@ -3182,7 +3183,7 @@ local function BuildTable(sort)
             all = data.total or 0, hour = HourCount(data),
             week = (wid and data.weekId == wid) and (data.week or 0) or 0,
             rate = JumpsPerHour(data), level = EntryXP(data), deaths = data.deaths,
-            duels = data.duelPoints, duelWins = data.duelWins })
+            duels = data.duelPoints, duelWins = data.duelWins, wins = data.duelWins })
     end
     add(playerKey, Me(), true)
     local byName = {}
@@ -3328,6 +3329,7 @@ local function BuildLeaderboardTab(page, width)
             else
                 c[10]:SetText(GRAY:format("-"))
             end
+            c[11]:SetText(entry.wins and num(entry.wins, "wins") or GRAY:format("-"))
         end
         return row
     end
@@ -3410,6 +3412,7 @@ local function BuildLeaderboardTab(page, width)
             rate = "average jumps per hour online, last 7 days (not AFK)",
             level = "XP = jumps + challenge, duel and crown rewards",
             duels = "duel rank points: win +20, draw +10, loss +5",
+            wins = "jump duels won",
         })[mode] or "click a column to sort - hover a player for details"
         self.footer:SetText(count .. "  -  " .. note)
     end
@@ -3705,7 +3708,7 @@ local TABS = {
 }
 
 local function CreateMainFrame()
-    local W, H = 850, 520
+    local W, H = 900, 520
     local f
     if HasTemplate("ButtonFrameTemplate") then
         f = CreateFrame("Frame", "JumpCounterMain", UIParent, "ButtonFrameTemplate")

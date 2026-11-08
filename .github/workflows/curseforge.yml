@@ -1,0 +1,78 @@
+name: Upload to CurseForge
+
+# Every published GitHub release is uploaded to the CurseForge project
+# "JumpingCounter" as a Release file for WoW Forever. The game version is
+# worked out from "## Interface:" in JumpCounter.toc (16001 -> 1.60.1).
+# Run it by hand (Actions tab) to retry a release, or with "dry run" to only
+# check the token and the game version.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to upload (e.g. v1.7.0)"
+        required: true
+      dry_run:
+        description: "Only check the token and game version - don't upload"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      CF_PROJECT_ID: "1790815"
+      CF_API: https://wow.curseforge.com/api
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Upload the release zip
+        run: |
+          set -euo pipefail
+          if [ -z "${CF_API_KEY:-}" ]; then
+            echo "::error::The CF_API_KEY secret is missing"; exit 1
+          fi
+
+          # "## Interface: 16001" -> "1.60.1"
+          interface=$(grep -m1 '^## Interface:' JumpCounter.toc | tr -dc '0-9')
+          len=${#interface}
+          major=$((10#${interface:0:len-4}))
+          minor=$((10#${interface:len-4:2}))
+          patch=$((10#${interface:len-2:2}))
+          game_version="$major.$minor.$patch"
+
+          versions=$(curl -sS --fail-with-body -H "X-Api-Token: $CF_API_KEY" "$CF_API/game/versions")
+          ids=$(echo "$versions" | jq -c --arg n "$game_version" '[.[] | select(.name == $n) | .id]')
+          echo "Game version $game_version -> CurseForge id(s) $ids"
+          if [ "$(echo "$ids" | jq length)" -ne 1 ]; then
+            echo "$versions" | jq -c --arg n "$game_version" '.[] | select(.name == $n)'
+            echo "::error::Expected exactly one CurseForge game version named $game_version"; exit 1
+          fi
+
+          gh release download "$TAG" --pattern '*.zip' --dir dist --repo "$GITHUB_REPOSITORY"
+          zip=$(ls dist/*.zip | head -n 1)
+          changelog=$(gh release view "$TAG" --json body --jq .body --repo "$GITHUB_REPOSITORY")
+          metadata=$(jq -n --arg changelog "$changelog" --arg name "JumpCounter ${TAG#v}" --argjson versions "$ids" \
+            '{changelog: $changelog, changelogType: "markdown", displayName: $name,
+              gameVersions: $versions, releaseType: "release"}')
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run: token works. Would upload $zip as 'JumpCounter ${TAG#v}' for $game_version."
+            exit 0
+          fi
+
+          curl -sS --fail-with-body -H "X-Api-Token: $CF_API_KEY" \
+            --form-string "metadata=$metadata" -F "file=@$zip" \
+            "$CF_API/projects/$CF_PROJECT_ID/upload-file"
+          echo
+          echo "Uploaded $zip to CurseForge project $CF_PROJECT_ID"

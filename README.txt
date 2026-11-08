@@ -60,6 +60,14 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
   There are lots of challenges to find - open the Challenges tab to see
   what you're working towards.
 
+JUMP DUELS
+  Now and then two players who are jumping around get paired for a
+  3-minute jump duel: a small window counts down and shows both scores,
+  and whoever jumps most wins bonus XP. Everyone online with the addon
+  sees the result in chat. At most one random duel every 30 minutes;
+  turn them off (or the results of others' duels) in Settings.
+  Both players need v1.5.0 or newer.
+
 JUMPS PER HOUR
   Jumps divided by your online time, not counting time flagged AFK. Shown
   after 30 minutes of online time (counted from v0.9.0).
@@ -83,6 +91,7 @@ COMMANDS (/jumps or /jc)
   /jumps share       post your total in chat
   /jumps version     your version, and who is on an older one
   /jumps update      the download link for the newest version
+  /jumps duel        challenge a random player who is jumping right now
   /jumps clear       remove other players from your leaderboard
   /jumps reset       reset this character's jump count (others keep theirs)
   /jumps help        list commands

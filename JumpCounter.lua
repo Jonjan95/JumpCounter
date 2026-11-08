@@ -22,6 +22,7 @@ local ScoreMessage                -- defined in the networking section
 local OnPeerScore                 -- defined in the notifications section
 local ToggleChallenges            -- defined in the progression section
 local CheckChallenges             -- defined in the progression section
+local OnDuelMessage               -- defined in the jump duels section
 local settings                    -- JumpCounterDB.settings
 
 local DEFAULT_SETTINGS = {
@@ -30,6 +31,8 @@ local DEFAULT_SETTINGS = {
     friendMilestones = false,     -- ...and also at every friend's 100/500/1,000s
     overtakes = true,             -- chat message when you pass / get passed
     myDeaths = true,              -- short chat line (only to you) when you die
+    duels = true,                 -- take part in random jump duels
+    duelNews = true,              -- chat line with the result of other players' duels
     myProgress = true,            -- jump level-ups and completed challenges
     sounds = false,               -- off by default; can be enabled in options
     minimapButton = true,         -- JumpCounter button on the minimap edge
@@ -414,6 +417,14 @@ local CHALLENGES = {
       desc = "Reach Prestige 3.",                             progress = function() return acct.prestige end },
     { id = "prestige3", name = "Constellation",    xp = 3000, goal = 5,
       desc = "Reach Prestige 5.",                             progress = function() return acct.prestige end },
+
+    -- 1.5.0: jump duels.
+    { id = "duel1",    name = "Duelist",           xp = 300,  goal = 1,
+      desc = "Win a jump duel.",                              progress = function() return acct.duelWins or 0 end },
+    { id = "duel2",    name = "Duel Champion",     xp = 1500, goal = 10,
+      desc = "Win 10 jump duels.",                            progress = function() return acct.duelWins or 0 end },
+    { id = "duel3",    name = "Undisputed",        xp = 4000, goal = 50,
+      desc = "Win 50 jump duels.",                            progress = function() return acct.duelWins or 0 end },
 }
 
 local function CountCompleted(data)
@@ -576,7 +587,8 @@ end
 local function Me()
     local wid = CurrentWeekId()
     local me = { total = 0, week = 0, weekId = wid, deaths = 0, rate = { jumps = 0, seconds = 0 },
-        challengeXP = acct.challengeXP, prestige = acct.prestige, done = acct.done,
+        challengeXP = acct.challengeXP + (acct.duelXP or 0), prestige = acct.prestige, done = acct.done,
+        duelWins = acct.duelWins or 0,
         class = charData.class, display = charData.display }
     for _, c in pairs(JumpCounterDB.chars) do
         me.total = me.total + (c.total or 0)
@@ -749,16 +761,18 @@ function ScoreMessage()
         UnitGUID("player") or "", me.deaths,
         UnitLevel("player") or 0, EntryXP(me), CountCompleted(me),
         jph and math.floor(jph + 0.5) or "", EntryPrestige(me), acct.id }, ":")
+    -- 1.5.0: duels won, after the character list (older versions ignore it).
+    local suffix = ":" .. (acct.duelWins or 0)
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
-    local length = #msg + 1
+    local length = #msg + 1 + #suffix
     for _, c in ipairs(MyCharacters()) do
         local part = (c.name:gsub("[:,=]", "")) .. "=" .. c.total
         if length + #part + 1 > MAX_MESSAGE then break end
         table.insert(chars, part)
         length = length + #part + 1
     end
-    return msg .. ":" .. table.concat(chars, ",")
+    return msg .. ":" .. table.concat(chars, ",") .. suffix
 end
 
 -- "Zivv Gg=3200,Alt=450" -> { { name = "Zivv Gg", total = 3200 }, ... }
@@ -899,8 +913,12 @@ end
 -- key/display: who sent it, as best the channel can tell us.
 -- reply(msg): sends a message straight back to the sender, or nil.
 local function HandleMessage(msg, key, display, reply)
+    if msg:match("^D[QAGPF]:") then
+        OnDuelMessage(msg)
+        return
+    end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
-        charLevel, xp, challenges, jph, prestige, acctId, characters = strsplit(":", msg)
+        charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -970,6 +988,7 @@ local function HandleMessage(msg, key, display, reply)
         entry.prestige = tonumber(prestige)       -- nil before 0.10.0
         entry.acct = acctId                       -- these two are nil before 1.1.0
         entry.characters = (characters and characters ~= "") and characters or nil
+        entry.duelWins = tonumber(duelWins)       -- nil before 1.5.0
         entry.version = (version and version ~= "") and version or nil
         entry.seen = time()
         JumpCounterDB.peers[key] = entry
@@ -1470,6 +1489,304 @@ local function TrackJump(inWater)
     CheckChallenges()
 end
 
+---------------------------------------------------------------------------
+-- Jump duels: now and then two players who are jumping around are paired
+-- for a 3-minute jump-off. Whoever jumps most wins, and everyone online
+-- with the addon sees the result.
+--
+-- Messages (sent like scores: guild, group and friends who use the addon):
+--   DQ:<id>:<start>:<acct>:<name>:<class>:<target acct>:<manual>  invite
+--   DA:<id>:<acct>                                              accept
+--   DG:<id>:<start>:<acct>:<name>:<class>:<acct>:<name>:<class>  go (from the inviter)
+--   DP:<id>:<acct>:<count>                                       progress
+--   DF:<id>:<acct>:<name>:<class>:<count>                        final count
+-- Times are server times, so both players count the same 3 minutes.
+---------------------------------------------------------------------------
+local DUEL_LENGTH = 180
+local DUEL_LEAD = 15              -- seconds from invite to start (countdown)
+local DUEL_COOLDOWN = 1800        -- at most one random duel per 30 minutes each
+local DUEL_CHANCE = 1 / 90        -- chance per minute to start one (~every 1.5 h)
+local DUEL_ACTIVE = 300           -- opponents must have jumped in the last 5 min
+local DUEL_MIN_VERSION = "1.5.0"
+local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
+
+local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, ... }
+local lastDuelEnd = 0             -- server time
+local busyUntil = {}              -- [acct id] = server time their duel ends
+local duelResults = {}            -- other players' duels: [id] = { finish, shown, players = {} }
+local duelTicker, duelFrame
+
+local function Clean(s) return (tostring(s or ""):gsub(":", "")) end
+local function MyDuelName() return charData.display or UnitName("player") end
+
+local function ClassColored(name, class)
+    local color = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    if color and color.WrapTextInColorCode then return color:WrapTextInColorCode(name) end
+    return name
+end
+
+local function SendDuel(...)
+    local parts = { ... }
+    for i = 1, select("#", ...) do parts[i] = tostring(parts[i] or "") end
+    Send(table.concat(parts, ":"))
+end
+
+-- manual = someone typed /jumps duel: skip the cooldown.
+local function CanDuel(now, manual)
+    return settings.duels and not duel and not UnitIsAFK("player")
+        and (manual or now - lastDuelEnd >= DUEL_COOLDOWN)
+end
+
+-- Players on 1.5.0+ who jumped recently and aren't in a duel.
+local function DuelCandidates(now)
+    local list = {}
+    for key, data in pairs(JumpCounterDB.peers) do
+        if data.acct and data.version and not IsNewerVersion(DUEL_MIN_VERSION, data.version)
+            and time() - (data.seen or 0) <= DUEL_ACTIVE and (busyUntil[data.acct] or 0) < now then
+            table.insert(list, { acct = data.acct, name = DisplayName(key), class = data.class })
+        end
+    end
+    return list
+end
+
+local function UpdateDuelFrame(now)
+    local f = duelFrame
+    if not f then return end
+    if duel and duel.state == "on" then
+        f.title:SetText("Jump duel vs " .. ClassColored(duel.opp.name, duel.opp.class))
+        local mine, theirs = duel.mine, duel.theirs
+        local lead = mine > theirs and "|cff33ff33%d|r" or (mine < theirs and "|cffff5555%d|r" or "|cffffffff%d|r")
+        f.score:SetText(("You " .. lead .. "  -  %d"):format(mine, theirs))
+        if now < duel.start then
+            f.time:SetText(("Starts in %d..."):format(duel.start - now))
+        elseif now < duel.finish then
+            local left = duel.finish - now
+            f.time:SetText(("%d:%02d left - jump!"):format(math.floor(left / 60), left % 60))
+        else
+            f.time:SetText("Time! Waiting for the final score...")
+        end
+        f:Show()
+    elseif f.resultUntil and now < f.resultUntil then
+        f:Show()
+    else
+        f:Hide()
+    end
+end
+
+local function EndDuel(d, text)
+    local now = GetServerTime()
+    duel = nil
+    lastDuelEnd = now
+    if duelFrame then
+        duelFrame.title:SetText("Jump duel vs " .. ClassColored(d.opp.name, d.opp.class))
+        duelFrame.score:SetText(("You %d  -  %d"):format(d.mine, d.theirs))
+        duelFrame.time:SetText(text)
+        duelFrame.resultUntil = now + 10
+    end
+end
+
+local function FinishDuel()
+    local d = duel
+    local opp = ClassColored(d.opp.name, d.opp.class)
+    if not d.heard then
+        -- Nothing ever arrived from them (disconnected?): no result.
+        Print(("The jump duel against %s was cancelled - no score arrived from them."):format(opp))
+        EndDuel(d, "Cancelled")
+        lastDuelEnd = lastDuelEnd - DUEL_COOLDOWN + 300   -- try again soon
+        return
+    end
+    local me, them = d.mine, d.theirs
+    local xp, text, short = DUEL_PLAY_XP
+    if me > them then
+        acct.duelWins = (acct.duelWins or 0) + 1
+        xp = DUEL_WIN_XP
+        text = ("You won the jump duel against %s, %d - %d! (+%d XP)"):format(opp, me, them, xp)
+        short = "|cff33ff33You won!|r"
+    elseif me < them then
+        acct.duelLosses = (acct.duelLosses or 0) + 1
+        text = ("%s won the jump duel, %d - %d. (+%d XP for playing)"):format(opp, them, me, xp)
+        short = "|cffff5555You lost|r"
+    else
+        acct.duelDraws = (acct.duelDraws or 0) + 1
+        text = ("The jump duel against %s is a draw, %d - %d! (+%d XP)"):format(opp, me, them, xp)
+        short = "Draw!"
+    end
+    if not d.oppFinal then text = text .. " |cff999999(their last known score)|r" end
+    acct.duelXP = (acct.duelXP or 0) + xp
+    dirty = true
+    Notify(GOLD:format(text), true)
+    EndDuel(d, short)
+    CheckChallenges()
+    RefreshBoardSoon()
+end
+
+local function DuelTick()
+    local now = GetServerTime()
+    local d = duel
+    if d and d.state ~= "on" and now >= d.start then
+        -- The invite was never confirmed.
+        if d.manual and d.state == "invited" then
+            Print(("%s didn't accept the duel (busy, AFK or duels turned off)."):format(
+                ClassColored(d.opp.name, d.opp.class)))
+        end
+        duel = nil
+    elseif d and d.state == "on" then
+        if now >= d.finish and not d.sentFinal then
+            d.sentFinal, d.doneAt = true, now
+            SendDuel("DF", d.id, acct.id, Clean(MyDuelName()), charData.class, d.mine)
+        elseif now < d.finish and d.mine ~= (d.sentCount or 0) and now - (d.lastProgress or 0) >= 5 then
+            d.sentCount, d.lastProgress = d.mine, now
+            SendDuel("DP", d.id, acct.id, d.mine)
+        end
+        if d.sentFinal and (d.oppFinal or now - d.doneAt >= 15) then FinishDuel() end
+    end
+    for id, r in pairs(duelResults) do
+        if now - r.finish > 300 then duelResults[id] = nil end
+    end
+    UpdateDuelFrame(now)
+    local showing = duelFrame and duelFrame:IsShown()
+    if not duel and not next(duelResults) and not showing and duelTicker then
+        duelTicker:Cancel()
+        duelTicker = nil
+    end
+end
+
+local function StartDuelTicker()
+    if not duelTicker then duelTicker = C_Timer.NewTicker(0.5, DuelTick) end
+end
+
+local function AnnounceDuelStart()
+    local now = GetServerTime()
+    Notify(GOLD:format(("JUMP DUEL vs %s! Most jumps in 3 minutes wins - starts in %d seconds!")
+        :format(ClassColored(duel.opp.name, duel.opp.class), math.max(0, duel.start - now))), true)
+    UpdateDuelFrame(now)
+end
+
+-- Invite a random active player. Returns the opponent, or nil.
+local function TryStartDuel(manual)
+    local now = GetServerTime()
+    local list = DuelCandidates(now)
+    if #list == 0 then return nil end
+    local opp = list[math.random(#list)]
+    local start = now + DUEL_LEAD
+    duel = { id = acct.id .. now, start = start, finish = start + DUEL_LENGTH, state = "invited",
+        opp = opp, mine = 0, theirs = 0, manual = manual }
+    SendDuel("DQ", duel.id, start, acct.id, Clean(MyDuelName()), charData.class,
+        opp.acct, manual and "1" or "")
+    StartDuelTicker()
+    return opp
+end
+
+function OnDuelMessage(msg)
+    local tag, id, a1, a2, a3, a4, a5, a6, a7 = strsplit(":", msg)
+    local now = GetServerTime()
+    if not id or id == "" then return end
+    if tag == "DQ" then
+        -- Invite: a1 start, a2 their acct, a3 name, a4 class, a5 target acct, a6 manual
+        local start = tonumber(a1)
+        if a5 ~= acct.id or a2 == acct.id or not start then return end
+        if not CanDuel(now, a6 == "1") or start - now < 5 or start - now > 60 then return end
+        duel = { id = id, start = start, finish = start + DUEL_LENGTH, state = "accepted",
+            opp = { acct = a2, name = a3, class = (a4 ~= "" and a4) or nil }, mine = 0, theirs = 0 }
+        SendDuel("DA", id, acct.id)
+        StartDuelTicker()
+    elseif tag == "DA" then
+        if duel and duel.id == id and duel.state == "invited" and a1 == duel.opp.acct then
+            duel.state = "on"
+            SendDuel("DG", id, duel.start, acct.id, Clean(MyDuelName()), charData.class,
+                duel.opp.acct, Clean(duel.opp.name), duel.opp.class)
+            AnnounceDuelStart()
+        end
+    elseif tag == "DG" then
+        -- Go: a1 start, a2/a3/a4 inviter, a5/a6/a7 invited
+        local start = tonumber(a1)
+        if not start then return end
+        busyUntil[a2], busyUntil[a5] = start + DUEL_LENGTH, start + DUEL_LENGTH
+        if duel and duel.id == id and duel.state == "accepted" then
+            duel.state, duel.start, duel.finish = "on", start, start + DUEL_LENGTH
+            AnnounceDuelStart()
+        end
+    elseif tag == "DP" then
+        if duel and duel.id == id and a1 == duel.opp.acct then
+            duel.theirs = math.max(duel.theirs, tonumber(a2) or 0)
+            duel.heard = true
+        end
+    elseif tag == "DF" then
+        -- Final: a1 acct, a2 name, a3 class, a4 count
+        local count = tonumber(a4)
+        if not count or a1 == acct.id then return end
+        if duel and duel.id == id then
+            if a1 == duel.opp.acct then
+                duel.theirs, duel.oppFinal, duel.heard = count, true, true
+            end
+            return
+        end
+        -- Someone else's duel: announce once both final scores are in.
+        local r = duelResults[id] or { finish = now, players = {} }
+        duelResults[id] = r
+        if r.shown or r.players[a1] then return end
+        r.players[a1] = { name = a2, class = (a3 ~= "" and a3) or nil, count = count }
+        local list = {}
+        for _, p in pairs(r.players) do table.insert(list, p) end
+        if #list == 2 then
+            r.shown = true
+            if settings.duelNews then
+                table.sort(list, function(x, y) return x.count > y.count end)
+                local a, b = list[1], list[2]
+                Print(("|cffffd100Jump duel:|r %s %s %s, %d - %d!"):format(
+                    ClassColored(a.name, a.class), a.count == b.count and "and" or "beat",
+                    ClassColored(b.name, b.class), a.count, b.count)
+                    .. (a.count == b.count and " It's a draw." or ""))
+            end
+        end
+        StartDuelTicker()
+    end
+end
+
+-- Called for every counted jump.
+local function DuelOnJump()
+    if duel and duel.state == "on" then
+        local now = GetServerTime()
+        if now >= duel.start and now < duel.finish then
+            duel.mine = duel.mine + 1
+            UpdateDuelFrame(now)
+        end
+    end
+end
+
+local function CreateDuelFrame()
+    local f = CreateFrame("Frame", "JumpCounterDuelFrame", UIParent, "BackdropTemplate")
+    f:SetSize(250, 64)
+    f:SetBackdrop(BACKDROP)
+    f:SetBackdropColor(0, 0, 0, 0.8)
+    f:SetFrameStrata("HIGH")
+    local pos = JumpCounterDB.ui.duelPos
+    if pos then
+        f:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
+    else
+        f:SetPoint("TOP", UIParent, "TOP", 0, -140)
+    end
+    MakeMovable(f)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, relPoint, x, y = self:GetPoint()
+        JumpCounterDB.ui.duelPos = { point, relPoint, x, y }
+    end)
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.title:SetPoint("TOP", 0, -8)
+    f.score = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    f.score:SetPoint("TOP", f.title, "BOTTOM", 0, -3)
+    f.time = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.time:SetPoint("TOP", f.score, "BOTTOM", 0, -3)
+    f:Hide()
+    duelFrame = f
+end
+
+-- Every minute, maybe start a random duel.
+local function MaybeStartRandomDuel()
+    if CanDuel(GetServerTime()) and math.random() < DUEL_CHANCE then TryStartDuel(false) end
+end
+
 
 ---------------------------------------------------------------------------
 -- Jump detection
@@ -1539,6 +1856,7 @@ local function OnJump()
     UpdateCounter()
     RefreshBoardSoon()
     CheckMyNotifications(Me().total)
+    DuelOnJump()
     TrackJump(inWater)
 end
 
@@ -1711,6 +2029,13 @@ local function ShowEntryTooltip(owner, entry)
     line("Deaths", data.deaths and Fmt(data.deaths) or "?")
     local challenges = isMe and CountCompleted(acct) or data.challenges
     line("Challenges", challenges and ("%d / %d"):format(challenges, #CHALLENGES) or "?")
+    local duelWins = isMe and (acct.duelWins or 0) or data.duelWins
+    if isMe then
+        line("Jump duels", ("%d won, %d lost, %d draws"):format(acct.duelWins or 0,
+            acct.duelLosses or 0, acct.duelDraws or 0))
+    elseif duelWins then
+        line("Jump duels won", tostring(duelWins))
+    end
 
     -- Characters on the account (from 1.1.0; older versions count one character).
     local chars
@@ -2078,7 +2403,12 @@ local function BuildSettingsTab(page, width)
     SettingCheck("overtakes", "Overtakes",
         "When you pass someone on the leaderboard or they pass you (at most once per person every 10 min).")
 
-    Section("Sound")
+    Section("Jump duels & sound")
+    SettingCheck("duels", "Random jump duels",
+        "Now and then you're paired with another player who is jumping around for a 3-minute "
+        .. "jump-off. Most jumps wins. At most one random duel every 30 minutes.")
+    SettingCheck("duelNews", "Other players' duel results",
+        "A chat line with the result when two other players finish a jump duel.")
     SettingCheck("sounds", "Play sounds", "Play a sound with milestone and overtake messages.")
 
     local help = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -2384,6 +2714,21 @@ SlashCmdList.JUMPCOUNTER = function(input)
             if mainFrame and mainFrame:IsShown() then mainFrame:Refresh() end
             Print("This character is now shown as " .. charData.display .. ".")
         end
+    elseif cmd == "duel" then
+        -- Challenge a random player who is jumping around right now.
+        if not settings.duels then
+            Print("Jump duels are turned off - turn them on in /jumps settings.")
+        elseif duel then
+            Print("You're already in a jump duel.")
+        else
+            local opp = TryStartDuel(true)
+            if opp then
+                Print(("Challenging %s to a jump duel..."):format(ClassColored(opp.name, opp.class)))
+            else
+                Print("Nobody to duel right now - opponents need v" .. DUEL_MIN_VERSION
+                    .. " or newer and must have jumped in the last 5 minutes.")
+            end
+        end
     elseif cmd == "update" or cmd == "download" then
         -- The download link, newer version or not.
         local newer = NewestVersion()
@@ -2459,6 +2804,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
         Print("/jumps counter - show/hide the small on-screen counter")
         Print(("/jumps prestige - reset your jump level at level %d for a prestige star"):format(PRESTIGE_LEVEL))
         Print("/jumps name <full name> - set this character's full name (if only the first shows)")
+        Print("/jumps duel - challenge a random player who is jumping right now")
         Print("/jumps update - the download link for the newest version")
         Print("/jumps minimap - show/hide the minimap button")
         Print("/jumps lock - lock/unlock counter position")
@@ -2538,6 +2884,9 @@ events:SetScript("OnEvent", function(_, event, ...)
         CheckChallenges()
         hooksecurefunc("JumpOrAscendStart", OnJump)
         Print(("v%s loaded - type /jumps to open."):format(VERSION))
+
+        CreateDuelFrame()
+        C_Timer.NewTicker(60, MaybeStartRandomDuel)
 
         C_Timer.NewTicker(BROADCAST_INTERVAL, function()
             if dirty then BroadcastScore() end

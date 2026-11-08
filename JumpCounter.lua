@@ -892,8 +892,9 @@ end
 -- friends of friends show up too - including the other faction through a
 -- Battle.net friend. Scores are passed on at most twice (hops), only if
 -- updated in the last RELAY_MAX_AGE, and in small batches:
---  * to a friend (whisper / Battle.net) when we first hear from them, then
---    at most every RELAY_CONTACT_INTERVAL;
+--  * to a friend (whisper / Battle.net) whenever we hear from them (at most
+--    once a minute, and every 10 minutes anyway): only scores they haven't
+--    had from us yet, or that changed since we last sent them (RELAY_RESEND);
 --  * to the guild, only scores that didn't come from the guild, at most
 --    every RELAY_GUILD_INTERVAL, skipping what someone else already sent.
 -- R:<acct>:<key>:<name>:<class>:<faction>:<total>:<weekId>:<week>:<deaths>
@@ -902,13 +903,14 @@ end
 -- Lua 5.1 allows at most 200 locals per file, so helpers live in do-blocks
 -- and only what other code needs is declared outside.
 local RELAY_GUILD_INTERVAL = 600
-local RelayToContact, RelayToGuild, ApplyRelay
+local RelayToContact, RelayToGuild, ApplyRelay, RelayTick
 do
     local RELAY_MAX_AGE = 3 * 86400
     local RELAY_MAX_HOPS = 2
     local RELAY_BATCH = 40
-    local RELAY_CONTACT_INTERVAL = 1800
-    local relayedToContact = {}       -- [contact key] = GetTime() of the last batch
+    local RELAY_CONTACT_GAP = 60      -- at most one batch a minute per friend
+    local RELAY_RESEND = 600          -- resend a score to a friend at most every 10 min
+    local contacts = {}               -- [contact key] = { last, reply, acct, sent = { [acct] = seen } }
     local guildRelayed = {}           -- [acct] = newest "seen" already passed around the guild
     local lastGuildRelay = -RELAY_GUILD_INTERVAL
 
@@ -937,12 +939,24 @@ do
         return list
     end
 
-    -- A friend we just heard from directly: tell them who we know.
+    -- A friend we heard from directly: tell them who we know that they
+    -- haven't heard about from us yet (or not for a while).
     function RelayToContact(contactKey, reply, contactAcct)
-        local last = relayedToContact[contactKey]
-        if last and GetTime() - last < RELAY_CONTACT_INTERVAL then return end
-        relayedToContact[contactKey] = GetTime()
-        for _, e in ipairs(RelayBatch(function(d) return d.acct ~= contactAcct end)) do
+        local c = contacts[contactKey]
+        if not c then
+            c = { last = -RELAY_CONTACT_GAP, sent = {} }
+            contacts[contactKey] = c
+        end
+        c.reply, c.acct = reply, contactAcct
+        if GetTime() - c.last < RELAY_CONTACT_GAP then return end
+        c.last = GetTime()
+        local batch = RelayBatch(function(d)
+            if d.acct == contactAcct then return false end
+            local sentSeen = c.sent[d.acct]
+            return not sentSeen or (d.seen or 0) - sentSeen >= RELAY_RESEND
+        end)
+        for _, e in ipairs(batch) do
+            c.sent[e.data.acct] = e.data.seen
             reply(RelayMessage(e.key, e.data))
         end
     end
@@ -957,6 +971,14 @@ do
         for _, e in ipairs(batch) do
             guildRelayed[e.data.acct] = e.data.seen
             Enqueue(RelayMessage(e.key, e.data), "GUILD")
+        end
+    end
+
+    -- Every 10 minutes: the guild, and friends who've gone quiet.
+    function RelayTick()
+        RelayToGuild()
+        for key, c in pairs(contacts) do
+            if c.reply then RelayToContact(key, c.reply, c.acct) end
         end
     end
 
@@ -3047,7 +3069,7 @@ events:SetScript("OnEvent", function(_, event, ...)
         -- Pass scores from outside the guild on to the guild now and then
         -- (random delay so guild members don't all send at once).
         C_Timer.NewTicker(RELAY_GUILD_INTERVAL, function()
-            C_Timer.After(math.random() * 120, RelayToGuild)
+            C_Timer.After(math.random() * 120, RelayTick)
         end)
 
         C_Timer.NewTicker(BROADCAST_INTERVAL, function()

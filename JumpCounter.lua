@@ -2171,7 +2171,7 @@ end
 
 ---------------------------------------------------------------------------
 -- Jump duels: now and then two players who are jumping around are paired
--- for a 1-minute jump-off. Whoever jumps most wins, and everyone online
+-- for a 30-second jump-off. Whoever jumps most wins, and everyone online
 -- with the addon sees the result.
 --
 -- Messages (sent like scores: guild, group and friends who use the addon):
@@ -2185,7 +2185,7 @@ end
 ---------------------------------------------------------------------------
 local DuelOnJump, CreateDuelFrame, MaybeStartRandomDuel, DuelCommand
 do
-    local DUEL_LENGTH = 60            -- 1.8.0: 1 minute (120 s in 1.7.x - the invite says which)
+    local DUEL_LENGTH = 30            -- 1.8.4: 30 s (60 s in 1.8.x, 120 s in 1.7.x - the invite says which)
     local OLD_DUEL_LENGTH = 180       -- invites from 1.5.0 / 1.6.0
     local DUEL_LEAD = 15              -- seconds from invite to start (countdown)
     -- 1.8.2: cooldowns per opponent, so a bigger group gets more duels (with
@@ -2250,7 +2250,8 @@ do
             if issecretvalue and issecretvalue(v) then return false end
             return v and true or false
         end
-        return on(UnitOnTaxi) or on(UnitInVehicle) or on(UnitIsDeadOrGhost)
+        -- 1.8.4: being dead or a ghost doesn't stop you - you can duel as a ghost.
+        return on(UnitOnTaxi) or on(UnitInVehicle)
     end
 
     -- Seconds until we may duel again (0 = now). Applies to every duel,
@@ -2285,7 +2286,6 @@ do
         if Plain(UnitIsAFK("player")) then return "afk" end
         if on(UnitOnTaxi) then return "taxi" end
         if on(UnitInVehicle) then return "vehicle" end
-        if on(UnitIsDeadOrGhost) then return "dead" end
         if PairLeft(now, oppAcct) > 0 then return "pair", PairLeft(now, oppAcct) end
         if CooldownLeft(now) > 0 then return "cooldown", CooldownLeft(now) end
     end
@@ -2383,9 +2383,7 @@ do
         local result = (me > them and 1) or (me < them and 0) or 0.5
         local change = DUEL_POINTS.Change(myPoints, theirPoints, result)
         local note = ""
-        if change < 0 and d.died then
-            change, note = 0, " |cff999999(you died during the duel - no duel points lost)|r"
-        elseif change < 0 and myPoints < DUEL_POINTS.protected then
+        if change < 0 and myPoints < DUEL_POINTS.protected then
             change, note = 0, " |cff999999(no points lost below " .. DuelRank(DUEL_POINTS.protected) .. ")|r"
         elseif result == 0 and (acct.lossStreak or 0) >= DUEL_POINTS.shieldAfter then
             change, note = 0, " |cff999999(shield: no points lost after 3 losses in a row)|r"
@@ -2401,9 +2399,7 @@ do
         elseif result == 0 then
             acct.duelLosses = (acct.duelLosses or 0) + 1
             -- The shield resets the streak, so it comes again after 3 more.
-            if d.died then
-                -- A death isn't a real loss: the streak stays as it was.
-            elseif change == 0 and note:find("shield") then
+            if change == 0 and note:find("shield") then
                 acct.lossStreak = 0
             else
                 acct.lossStreak = (acct.lossStreak or 0) + 1
@@ -2606,16 +2602,6 @@ do
     end
 
     -- Called for every counted jump.
-    -- 1.8.4: dying during the countdown or the duel costs no duel points
-    -- (the other player still wins as usual).
-    function DUEL_POINTS.OnDeath()
-        local now = GetServerTime()
-        if duel and (duel.state == "on" or duel.state == "accepted" or duel.state == "invited")
-            and now < duel.finish then
-            duel.died = true
-        end
-    end
-
     function DuelOnJump()
         if duel and duel.state == "on" then
             local now = GetServerTime()
@@ -3867,7 +3853,7 @@ local function BuildSettingsTab(page, width)
 
     Section("Duels, crown & sound")
     SettingCheck("duels", "Random jump duels",
-        "Now and then you're paired with another player who is jumping around for a 1-minute "
+        "Now and then you're paired with another player who is jumping around for a 30-second "
         .. "jump-off. Most jumps wins. At most one duel every 10 minutes, and the same two players "
         .. "once per 30 minutes (also with /jumps duel). More players around means more duels.")
     SettingCheck("duelNews", "Other players' duel results",
@@ -4138,7 +4124,6 @@ local function OnPlayerDead()
     charData.deaths = (charData.deaths or 0) + 1
     acct.stats.sinceDeath = 0           -- "without dying" challenges start over
     Daily.OnDeath()
-    DUEL_POINTS.OnDeath()
     dirty = true
     UpdateCounter()
     RefreshBoardSoon()

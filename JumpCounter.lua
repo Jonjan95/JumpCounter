@@ -5,11 +5,12 @@ local ADDON_NAME = ...
 local PREFIX = "JumpCounter"      -- addon message prefix (max 16 chars)
 local BROADCAST_INTERVAL = 30     -- seconds between automatic score broadcasts
 -- A normal jump on flat ground keeps you in the air for about 0.82 s (jump
--- speed ~7.96 yd/s, gravity ~19.29 yd/s^2). Counted jumps on land must be at
--- least this far apart, so tiny hops (e.g. jumping into a wall and getting
--- "stuck") can't be spammed faster than real jumps. A little under the full
--- air time so continuous bunny-hopping never loses a jump to frame timing.
-local JUMP_MIN_INTERVAL = 0.75
+-- speed ~7.96 yd/s, gravity ~19.29 yd/s^2). Running uphill you land sooner:
+-- ~0.70 s on a 10 degree slope, ~0.55 s at 20 degrees. Counted jumps on land
+-- must be at least this far apart (and you must have landed in between), so
+-- tiny hops (e.g. jumping into a wall and getting "stuck") can't be spammed,
+-- while real jumps up a hill still count.
+local JUMP_MIN_INTERVAL = 0.5
 local SWIM_JUMP_COOLDOWN = 0.6    -- min seconds between counted jumps in water
 local PEER_EXPIRY_DAYS = 60       -- drop players not heard from in this long
 local BOARD_ROWS = 15             -- visible rows; the list scrolls
@@ -38,6 +39,7 @@ local DEFAULT_SETTINGS = {
     myMilestones = true,          -- chat message when you hit a milestone
     friendRankUps = true,         -- chat message when a friend earns a jump rank
     friendMilestones = false,     -- ...and also at every friend's 100/500/1,000s
+    friendLevels = true,          -- chat message when a friend's character levels up (30+)
     overtakes = true,             -- chat message when you pass / get passed
     myDeaths = true,              -- short chat line (only to you) when you die
     duels = true,                 -- take part in random jump duels
@@ -1374,6 +1376,8 @@ local function HandleMessage(msg, key, display, reply, via)
             oldPrestige = sameAccount and sameAccount.prestige
             if sameAccount then previous = sameAccount end
         end
+        -- Character level before this score, if it's the same character.
+        local oldCharLevel = previous and guid and previous.guid == guid and previous.charLevel
         local entry = previous or {}
         entry.total = total
         entry.class = (class and class ~= "") and class or entry.class
@@ -1419,7 +1423,7 @@ local function HandleMessage(msg, key, display, reply, via)
         heardThisSession[who] = true
         PruneStalePeers()
         if JumpCounterDB.peers[key] ~= entry then return end   -- itself a leftover copy
-        OnPeerScore(key, oldTotal, total, entry.class, oldPrestige, entry.prestige)
+        OnPeerScore(key, oldTotal, total, entry.class, oldPrestige, entry.prestige, oldCharLevel)
 
         NoteVersion(version)
         -- A friend heard directly: pass on the scores we know.
@@ -1807,11 +1811,24 @@ end
 
 -- Called whenever a friend's score arrives. oldTotal is nil the first time
 -- we ever hear from them, so we don't announce anything for new players.
-function OnPeerScore(key, oldTotal, newTotal, class, oldPrestige, newPrestige)
+function OnPeerScore(key, oldTotal, newTotal, class, oldPrestige, newPrestige, oldCharLevel)
     if not oldTotal then return end
+    -- Character level-up (same character as before). The early levels come
+    -- every few minutes, so only 10 and 20 - then every level from 30.
+    local data = JumpCounterDB.peers[key]
+    local level = data and data.charLevel
+    if level and oldCharLevel and level > oldCharLevel and settings.friendLevels
+        and (level >= 30 or math.floor(level / 10) > math.floor(oldCharLevel / 10)) then
+        local maxLevel = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 60
+        if level >= maxLevel then
+            Notify(("%s reached max level (%d)!"):format(ColoredName(key, class), level), true)
+        else
+            Notify(("%s reached level %d!"):format(ColoredName(key, class), level))
+        end
+    end
     if newPrestige and newPrestige > (oldPrestige or 0) and settings.friendRankUps then
-        Notify(("%s reached %sPrestige %d!"):format(ColoredName(key, class),
-            PrestigeTag(newPrestige), newPrestige))
+        Notify(("%s reached Prestige %d |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t!")
+            :format(ColoredName(key, class), newPrestige))
     end
     if newTotal <= oldTotal then return end
     local name = ColoredName(key, class)
@@ -1870,8 +1887,9 @@ local function DoPrestige()
     acct.prestigeSpent = acct.prestigeSpent + PRESTIGE_XP
     knownLevel = EntryLevel(Me())
     dirty = true
-    Notify(GOLD:format(("%sPrestige %d! Your jump level starts over - total jumps and ranks are kept.")
-        :format(PrestigeTag(acct.prestige), acct.prestige)), true)
+    Notify(GOLD:format(("Prestige %d |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t! "
+        .. "Your jump level starts over - total jumps and ranks are kept.")
+        :format(acct.prestige)), true)
     CheckChallenges()                 -- prestige challenges
     RefreshBoardSoon()
 end
@@ -2242,7 +2260,9 @@ do
         end
     end
 
-    -- True when we can't jump right now: on a flight path, in a vehicle or dead.
+    -- True when we can't jump right now: on a flight path, in a vehicle or
+    -- swimming (1.8.5: under water you can't jump at all, so no duel starts
+    -- while you're in the water - at the surface we can't tell the difference).
     local function CantJump()
         local function on(f)
             if not f then return false end
@@ -2251,7 +2271,7 @@ do
             return v and true or false
         end
         -- 1.8.4: being dead or a ghost doesn't stop you - you can duel as a ghost.
-        return on(UnitOnTaxi) or on(UnitInVehicle)
+        return on(UnitOnTaxi) or on(UnitInVehicle) or on(IsSwimming)
     end
 
     -- Seconds until we may duel again (0 = now). Applies to every duel,
@@ -2286,6 +2306,7 @@ do
         if Plain(UnitIsAFK("player")) then return "afk" end
         if on(UnitOnTaxi) then return "taxi" end
         if on(UnitInVehicle) then return "vehicle" end
+        if on(IsSwimming) then return "swim" end
         if PairLeft(now, oppAcct) > 0 then return "pair", PairLeft(now, oppAcct) end
         if CooldownLeft(now) > 0 then return "cooldown", CooldownLeft(now) end
     end
@@ -2296,12 +2317,13 @@ do
         afk = "%s is AFK.",
         taxi = "%s is on a flight path.",
         vehicle = "%s is in a vehicle.",
+        swim = "%s is swimming.",
         dead = "%s is dead.",
         cooldown = "%s just had a duel - they can duel again in %d min.",
         pair = "You and %s dueled recently - you can duel each other again in %d min.",
     }
     -- How long to skip someone after they declined (seconds) when picking.
-    local DECLINE_SKIP = { off = 1800, busy = 90, afk = 300, taxi = 180, vehicle = 180, dead = 120 }
+    local DECLINE_SKIP = { off = 1800, busy = 90, afk = 300, taxi = 180, vehicle = 180, swim = 60, dead = 120 }
 
     -- Players on 1.5.0+ who jumped recently and aren't in a duel.
     local function DuelCandidates(now)
@@ -2658,6 +2680,8 @@ do
             Print("Jump duels are turned off - turn them on in /jumps settings.")
         elseif duel then
             Print("You're already in a jump duel.")
+        elseif Plain(IsSwimming()) then
+            Print("You can't start a jump duel while swimming - get out of the water first.")
         elseif CooldownLeft(GetServerTime()) > 0 then
             Print(("You had a jump duel recently - you can duel again in %d min.")
                 :format(math.ceil(CooldownLeft(GetServerTime()) / 60)))
@@ -2805,57 +2829,83 @@ local wasGrounded = true
 local wasSwimming = false
 local debugMode = false
 local jumpStartedAt               -- debug: when the last land jump left the ground
+-- In water (measured in game): a real surface hop takes you out of the water
+-- - falling and no longer submerged - within a few hundredths of a second.
+-- A press under the surface just swims you upward and you never leave the
+-- water, with or without water breathing. So a press in water only counts
+-- once we see you leave the water.
+-- Also: if the jump key is still down when you come back down onto the
+-- water, the game hops you straight out again. You never show as swimming
+-- (only "submerged" for a frame or two), so that press happened in the air.
+-- Count that hop too. (On land a held key does NOT make you jump again.)
+local airPress = {
+    pressAt = nil,     -- jump pressed in the water, waiting to see us leave it
+    leave = 0.3,       -- ...which a surface hop does well within this
+    inAir = false,     -- falling and out of the water
+    touchAt = nil,     -- when we came down onto the water from the air
+    rehop = 0.15,      -- a hop out of the water must follow the touch this quickly
+}
 local groundTracker = CreateFrame("Frame")
 groundTracker:SetScript("OnUpdate", function()
     wasSwimming = Plain(IsSwimming()) and true or false
-    local grounded = not (Plain(IsFalling()) or wasSwimming or Plain(IsFlying()) or Plain(UnitOnTaxi("player")))
+    local falling = Plain(IsFalling())
+    local grounded = not (falling or wasSwimming or Plain(IsFlying()) or Plain(UnitOnTaxi("player")))
     -- /jumps debug: report how long each jump was in the air.
     if debugMode and jumpStartedAt and grounded and not wasGrounded then
         Print(("debug: landed after %.2f s in the air"):format(GetTime() - jumpStartedAt))
         jumpStartedAt = nil
     end
+    local now = GetTime()
+    local wet = wasSwimming or Plain(IsSubmerged and IsSubmerged())
+    if Plain(IsFlying()) or Plain(UnitOnTaxi("player")) then
+        airPress.inAir, airPress.touchAt, airPress.pressAt = false, nil, nil
+    elseif falling and not wet then
+        -- Out of the water and in the air: a surface hop, if it follows a
+        -- press in the water or a touch of the surface right away.
+        local press, touch = airPress.pressAt, airPress.touchAt
+        local hopped = (press and now - press <= airPress.leave)
+            or (touch and now - touch <= airPress.rehop and lastJumpTime < touch)
+        if hopped and now - lastJumpTime >= SWIM_JUMP_COOLDOWN then
+            if debugMode then Print("debug: hopped out of the water - counted") end
+            airPress.Count(true, now)
+        end
+        airPress.inAir, airPress.touchAt, airPress.pressAt = true, nil, nil
+    elseif wet then
+        if airPress.inAir then airPress.touchAt = now end
+        airPress.inAir = false
+        if airPress.pressAt and now - airPress.pressAt > airPress.leave then
+            if debugMode then Print("debug: pressed in the water but stayed in it (underwater) - not counted") end
+            airPress.pressAt = nil
+        end
+    else
+        airPress.inAir, airPress.touchAt, airPress.pressAt = false, nil, nil
+    end
     wasGrounded = grounded
 end)
 
--- Is the breath bar draining? That only happens while under the surface.
-local function IsBreathDraining()
-    for i = 1, (MIRRORTIMER_NUMTIMERS or 3) do
-        local timer, _, _, scale = GetMirrorTimerInfo(i)
-        timer, scale = Plain(timer), Plain(scale)
-        if timer == "BREATH" and scale and scale < 0 then return true end
-    end
-    return false
-end
-
--- IsSubmerged() exists on this client but is also true at the surface, so it
--- can't tell the two apart. The breath bar draining is the reliable signal.
-local function IsUnderwater()
-    return IsBreathDraining()
-end
-
 local function OnJump()
     if debugMode then
-        Print(("debug: falling=%s swimming=%s grounded=%s breath=%s - %.2f s since last counted jump"):format(
+        Print(("debug: falling=%s swimming=%s grounded=%s - %.2f s since last counted jump"):format(
             tostring(Plain(IsFalling())), tostring(Plain(IsSwimming())), tostring(wasGrounded),
-            tostring(IsBreathDraining()), GetTime() - lastJumpTime))
+            GetTime() - lastJumpTime))
     end
     if Plain(UnitOnTaxi("player")) or Plain(IsFlying()) then return end
     local now = GetTime()
-    local inWater = wasSwimming or Plain(IsSwimming())
-    if inWater then
-        -- Pressing jump underwater just swims upward; only surface hops count.
-        if IsUnderwater() then return end
-        -- The surface can still be spammed, so allow at most one jump per
-        -- SWIM_JUMP_COOLDOWN (about one real jump's length).
-        if now - lastJumpTime < SWIM_JUMP_COOLDOWN then return end
-    else
-        -- On land: only count jumps that start from the ground (no mid-air spam).
-        if not wasGrounded then return end
-        wasGrounded = false
-        if debugMode then jumpStartedAt = now end
-        -- Too soon after the last counted jump to be a full jump.
-        if now - lastJumpTime < JUMP_MIN_INTERVAL then return end
+    if wasSwimming or Plain(IsSwimming()) then
+        -- In the water: counted once we see you leave it (see above).
+        airPress.pressAt = now
+        return
     end
+    -- On land: only count jumps that start from the ground (no mid-air spam).
+    if not wasGrounded then return end
+    wasGrounded = false
+    if debugMode then jumpStartedAt = now end
+    airPress.Count(false, now)
+end
+
+function airPress.Count(inWater, now)
+    -- Too soon after the last counted jump to be a full jump.
+    if not inWater and now - lastJumpTime < JUMP_MIN_INTERVAL then return end
     lastJumpTime = now
 
     charData.total = charData.total + 1
@@ -3848,6 +3898,9 @@ local function BuildSettingsTab(page, width)
         "A chat message when someone on your leaderboard earns a jump rank or prestiges.")
     SettingCheck("friendMilestones", "All friends' milestones",
         "Also a chat message at every friend's 100, 500 and every 1,000 jumps. Busy in a big guild.")
+    SettingCheck("friendLevels", "Friends' character levels",
+        "A chat message when someone on your leaderboard levels up their character: "
+        .. "at level 10 and 20, then every level from 30 (the early levels come too fast).")
     SettingCheck("overtakes", "Overtakes",
         "When you pass someone on the leaderboard or they pass you (at most once per person every 10 min).")
 
@@ -4335,6 +4388,7 @@ events:SetScript("OnEvent", function(_, event, ...)
         -- already be finished.
         UpdateDerivedStats()
         CheckChallenges()
+        JumpCounterDB.jumpTrace = nil      -- left over from a 1.8.5 test build
         hooksecurefunc("JumpOrAscendStart", OnJump)
         Print(("v%s loaded - type /jumps to open."):format(VERSION))
 

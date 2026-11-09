@@ -58,6 +58,7 @@ CHAT MESSAGES (change them in the Settings tab)
     - your milestones: 100, 500 and every 1,000 jumps
     - your level-ups, completed challenges and new ranks
     - friends' new ranks and prestiges
+    - friends' character levels: at 10 and 20, then every level from 30
     - when you pass someone on the leaderboard, or they pass you
 
 JUMP LEVELS, CHALLENGES & PRESTIGE
@@ -83,7 +84,7 @@ JUMP DUELS
   sees the result in chat. The more of you are jumping, the more often
   duels happen: at most one every 10 minutes for you, and the same two
   players once per 30 minutes (also with /jumps duel). Turn them off (or
-  the results of others' duels) in Settings.
+  the results of others' duels) in Settings. No duels while swimming.
   Both players need v1.7.0 or newer.
 
   DUEL RANKS: duels are rated, like chess. Win and you take duel points

@@ -758,6 +758,12 @@ local function InitDB()
         db.account = a
     end
     acct = db.account
+    -- 1.8.8: "this session" carries on after a /reload or a quick restart
+    -- (updating the addon): the count is saved, with the time we were last
+    -- online, and picked up again if that was under 10 minutes ago.
+    local sess = acct.session
+    if sess and time() - (sess.at or 0) <= 600 then sessionJumps = sess.jumps or 0 end
+    acct.session = { jumps = sessionJumps, at = time() }
     if not acct.id then
         -- Random id so others can tell your characters belong together
         -- (nothing about your Battle.net account is shared).
@@ -3313,6 +3319,7 @@ function airPress.Count(inWater, now)
 
     charData.total = charData.total + 1
     sessionJumps = sessionJumps + 1
+    acct.session.jumps, acct.session.at = sessionJumps, time()
     charData.rate.jumps = charData.rate.jumps + 1   -- all-time, kept per character
     AddRate(1, 0)
     local wid = CurrentWeekId()
@@ -3667,8 +3674,8 @@ local function BuildOverviewTab(page, width)
         .. "after 3 losses in a row the next one is free.")
 
     -- "Next up": the next rank and the four challenges closest to done. (How
-    -- far it is to prestige is the XP bar in the header; the second line
-    -- becomes "Prestige - Ready!" with its button once you can.)
+    -- far it is to prestige is the XP bar in the header, and that's also
+    -- where the Prestige button appears at jump level 100.)
     local TOP = -4 - TILE_H - 12
     local leftW = math.floor((width - 8) * 0.56)
     local rightX = 4 + leftW + 18
@@ -3696,19 +3703,6 @@ local function BuildOverviewTab(page, width)
         Tip(s, function() return s.tipTitle, s.tipText end)
         slots[i] = s
     end
-    local prestigeButton = CreateFrame("Button", nil, slots[2], "UIPanelButtonTemplate")
-    prestigeButton:SetSize(96, 18)
-    prestigeButton:SetPoint("TOPRIGHT", 0, 3)
-    prestigeButton:SetText("Prestige!")
-    prestigeButton:SetScript("OnClick", function() AskPrestige() end)
-    prestigeButton:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Prestige")
-        GameTooltip:AddLine("Reset your jump level to 1 and earn a prestige star. "
-            .. "Total jumps, ranks, total XP and challenges are kept.", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    prestigeButton:SetScript("OnLeave", GameTooltip_Hide)
 
     -- Rows of "label ... value", like the Character window's stats.
     local function Rows(x, y, w, defs)
@@ -3854,23 +3848,6 @@ local function BuildOverviewTab(page, width)
         end
         s.tipTitle, s.tipText = "Jump ranks", "Your all-time jumps earn you rank titles."
 
-        -- Prestige: only once you can (jump level 100).
-        local can = CanPrestige()
-        prestigeButton:SetShown(can)
-        if can then
-            s = slots[2]
-            s:Show()
-            s.left:SetText(("|cffffd100Prestige|r - you've reached jump level %d!"):format(PRESTIGE_LEVEL))
-            s.right:SetText("")
-            s.bar:SetStatusBarColor(0.58, 0.0, 0.55)
-            s.bar:SetMinMaxValues(0, 1)
-            s.bar:SetValue(1)
-            s.bar.text:SetText("Ready!")
-            s.tipTitle = "Prestige"
-            s.tipText = "Reset your jump level to 1 and earn a prestige star. "
-                .. "Total jumps, ranks, total XP and challenges are kept."
-        end
-
         -- The unfinished challenges closest to done fill the other lines.
         local open = {}
         for _, c in ipairs(CHALLENGES) do
@@ -3883,7 +3860,7 @@ local function BuildOverviewTab(page, width)
             if a.frac ~= b.frac then return a.frac > b.frac end
             return a.c.xp < b.c.xp
         end)
-        local first = can and 3 or 2
+        local first = 2
         for i = first, #slots do
             s = slots[i]
             local o = open[i - first + 1]
@@ -4679,6 +4656,22 @@ local function CreateMainFrame()
     who:SetPoint("RIGHT", strip, "LEFT", -10, 0)
     who:SetJustifyH("LEFT")
     who:SetWordWrap(false)
+    -- The Prestige button: in the header, left of your jump level, once you
+    -- have reached jump level 100 (1.8.8; it used to be on the Overview tab).
+    local prestigeButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    prestigeButton:SetSize(92, 18)
+    prestigeButton:SetPoint("RIGHT", strip, "LEFT", -10, 0)
+    prestigeButton:SetText("Prestige!")
+    prestigeButton:SetScript("OnClick", function() AskPrestige() end)
+    prestigeButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Prestige")
+        GameTooltip:AddLine("You've reached jump level " .. PRESTIGE_LEVEL .. "! Reset your jump level to 1 and "
+            .. "earn a prestige star. Total jumps, ranks, total XP and challenges are kept.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    prestigeButton:SetScript("OnLeave", GameTooltip_Hide)
+    prestigeButton:Hide()
     local headBar = ProgressBar(f, 11, 0.58, 0.0, 0.55)
     headBar:SetPoint("TOPLEFT", 68, -45)
     headBar:SetPoint("TOPRIGHT", -14, -45)
@@ -4776,6 +4769,7 @@ local function CreateMainFrame()
             .. (rankTitle and ("  |cffffffff<%s>|r"):format(rankTitle) or "")
             .. (newer and ("   |cffff5555Update available: v%s|r |cff999999(/jumps update)|r"):format(newer) or ""))
         strip:SetText(PrestigeTag(EntryPrestige(me)) .. "Jump level |cffffd100" .. level .. "|r")
+        prestigeButton:SetShown(CanPrestige())
         headBar:SetMinMaxValues(0, need)
         headBar:SetValue(into)
         headBar.text:SetText(("XP %s / %s"):format(Fmt(into), Fmt(need)))
@@ -4971,6 +4965,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
     elseif cmd == "reset" then
         charData.total = 0
         sessionJumps = 0
+        acct.session.jumps = 0
         dirty = true
         UpdateCounter()
         Print("Jump count reset for this character (" .. playerKey .. ").")
@@ -5112,6 +5107,7 @@ events:SetScript("OnEvent", function(_, event, ...)
             local now = GetTime()
             local dt = math.min(now - lastTick, 30)
             lastTick = now
+            acct.session.at = time()          -- still online (see "this session")
             if not Plain(UnitIsAFK("player")) then
                 local before = JumpsPerHour(Me())
                 charData.rate.seconds = charData.rate.seconds + dt

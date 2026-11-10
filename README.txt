@@ -26,12 +26,13 @@ OPEN IT
   Type /jumps, click the JumpingCounter button on the minimap (drag it to
   move it, hide it in Settings), or use the addon menu next to the minimap.
   Everything is in that one window. Your name, rank, jump level and XP bar
-  are always at the top, with tabs along the bottom:
+  are always at the top (a "Prestige!" button appears there at jump level
+  100), with tabs along the bottom:
 
     Overview     your big numbers, your next rank and the challenges you're
                  closest to, your jumps over the last 7 days, your records
-                 and all your numbers. A "Prestige!" button appears here at
-                 level 100.
+                 and all your numbers. ("This session" carries on after a
+                 /reload or a restart, if you're back within 10 minutes.)
     Leaderboard  everyone you can see: level, title, total jumps, this hour,
                  this week, average per hour, deaths, duel rank and wins. It
                  opens sorted by this hour; click a column header to sort

@@ -276,8 +276,8 @@ end
 ---------------------------------------------------------------------------
 -- Jump levels: XP = 1 per jump + challenge, daily, duel and crown rewards.
 -- 1.8.3: going from level L to L+1 costs 60 + 3*(L-1) XP (it was
--- 50 + 25*(L-1)), so level 50 - and a prestige star - takes 6,468 XP:
--- about one star every 2.5 to 4.5 days of normal play.
+-- 50 + 25*(L-1)). 1.8.6: a prestige star needs level 100 (20,493 XP, it
+-- was level 50 and 6,468 XP) - about one star every 3 to 4 weeks.
 ---------------------------------------------------------------------------
 local function XPForLevel(level)
     return 60 + 3 * (level - 1)
@@ -307,15 +307,16 @@ end
 -- to reach PRESTIGE_LEVEL); extra XP carries over. Total jumps, ranks, total
 -- XP and challenges are kept.
 ---------------------------------------------------------------------------
--- 1.8.3: everyone's stars were recalculated from total XP with the new
--- level curve (once, when you update: PRESTIGE_MODEL). Friends still on an
--- older version are recalculated the same way on our screen, so the same
--- XP always shows the same stars and level.
-local PRESTIGE_LEVEL = 50
+-- 1.8.3 and 1.8.6: everyone's stars were recalculated from total XP (once,
+-- when you update: PRESTIGE_MODEL). Friends still on an older version are
+-- recalculated the same way on our screen, so the same XP always shows the
+-- same stars and level. 1.8.6 also halved challenge rewards (and the XP of
+-- challenges already done) - friends' own addons do that when they update.
+local PRESTIGE_LEVEL = 100
 local PRESTIGE_XP = 0
-for l = 1, PRESTIGE_LEVEL - 1 do PRESTIGE_XP = PRESTIGE_XP + XPForLevel(l) end   -- 6,468
-local PRESTIGE_MODEL = 2          -- 1 = stars bought under the old rules
-local PRESTIGE_SINCE = "1.8.3"    -- versions from here on send stars of the new model
+for l = 1, PRESTIGE_LEVEL - 1 do PRESTIGE_XP = PRESTIGE_XP + XPForLevel(l) end   -- 20,493
+local PRESTIGE_MODEL = 3          -- 1 = old rules, 2 = level 50 (1.8.3), 3 = level 100 (1.8.6)
+local PRESTIGE_SINCE = "1.8.6"    -- versions from here on send stars of the current model
 
 -- A friend on an older version: their stars follow the old rules.
 local function OldPrestigeModel(data)
@@ -343,10 +344,32 @@ local function EntryLevel(data)
     return LevelFromXP(math.max(0, EntryXP(data) - PrestigeSpent(data)))
 end
 
--- Gold star (the star raid marker) + number, or "" without prestige.
+-- 1.8.6: the star changes look with your prestige - a tier at 1, 3, 8 and
+-- 15 stars (the same steps as the prestige challenges). The icons are our
+-- own images in Media\; a game that hasn't been restarted since the update
+-- that added them can't find them (see Media\Media.lua), and then every
+-- star is the old gold one (the star raid marker).
+-- Returns the tier's number and name.
+local function PrestigeTier(n)
+    n = n or 0
+    if n >= 15 then return 4, "Radiant" end
+    if n >= 8 then return 3, "Gold" end
+    if n >= 3 then return 2, "Silver" end
+    if n >= 1 then return 1, "Bronze" end
+    return 0
+end
+
+local function PrestigeIcon(n)
+    if not JumpCounter_MediaLoaded then
+        return "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t"
+    end
+    return ("|TInterface\\AddOns\\JumpCounter\\Media\\tier%d:0|t"):format(math.max(1, (PrestigeTier(n))))
+end
+
+-- Tier star + number, or "" without prestige.
 local function PrestigeTag(n)
     if not n or n <= 0 then return "" end
-    return ("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t|cffffd100%d|r "):format(n)
+    return ("%s|cffffd100%d|r "):format(PrestigeIcon(n), n)
 end
 
 ---------------------------------------------------------------------------
@@ -390,129 +413,129 @@ local function ClassCount()
 end
 
 local CHALLENGES = {
-    { id = "mount1",  name = "Saddle Hopper",     xp = 250,  goal = 100,
+    { id = "mount1",  name = "Saddle Hopper",     xp = 125,  goal = 100,
       desc = "Jump 100 times while mounted.",                 progress = function() return Stat("mounted") end },
-    { id = "mount2",   name = "Cavalry Bounce",    xp = 750,  goal = 1000,
+    { id = "mount2",   name = "Cavalry Bounce",    xp = 375,  goal = 1000,
       desc = "Jump 1,000 times while mounted.",               progress = function() return Stat("mounted") end },
-    { id = "swim",     name = "Splash Jumper",     xp = 250,  goal = 100,
+    { id = "swim",     name = "Splash Jumper",     xp = 125,  goal = 100,
       desc = "Jump 100 times at the surface of water.",       progress = function() return Stat("swim") end },
-    { id = "ghost",    name = "Ghost Hop",         xp = 250,  goal = 25,
+    { id = "ghost",    name = "Ghost Hop",         xp = 125,  goal = 25,
       desc = "Jump 25 times as a ghost.",                     progress = function() return Stat("ghost") end },
-    { id = "combat",   name = "Battle Bunny",      xp = 500,  goal = 250,
+    { id = "combat",   name = "Battle Bunny",      xp = 250,  goal = 250,
       desc = "Jump 250 times in combat.",                     progress = function() return Stat("combat") end },
-    { id = "dungeon",  name = "Dungeon Bouncer",   xp = 500,  goal = 500,
+    { id = "dungeon",  name = "Dungeon Bouncer",   xp = 250,  goal = 500,
       desc = "Jump 500 times inside dungeons or raids.",      progress = function() return Stat("instance") end },
-    { id = "party",    name = "Party Hopper",      xp = 300,  goal = 100,
+    { id = "party",    name = "Party Hopper",      xp = 150,  goal = 100,
       desc = "Jump 100 times in a full group of 5 or more.",  progress = function() return Stat("group") end },
-    { id = "zones1",   name = "Wanderer",          xp = 300,  goal = 10,
+    { id = "zones1",   name = "Wanderer",          xp = 150,  goal = 10,
       desc = "Jump in 10 different zones.",                   progress = function() return CountKeys(acct.stats.zones) end },
-    { id = "zones2",   name = "Globetrotter",      xp = 1000, goal = 30,
+    { id = "zones2",   name = "Globetrotter",      xp = 500,  goal = 30,
       desc = "Jump in 30 different zones.",                   progress = function() return CountKeys(acct.stats.zones) end },
-    { id = "capitals", name = "Capital Tourist",   xp = 500,  goal = 3,
+    { id = "capitals", name = "Capital Tourist",   xp = 250,  goal = 3,
       desc = "Jump in all three capital cities of your faction.",
       progress = CapitalCount },
-    { id = "enemycap", name = "Diplomatic Incident", xp = 1000, goal = 1,
+    { id = "enemycap", name = "Diplomatic Incident", xp = 500,  goal = 1,
       desc = "Jump in an enemy faction's capital city.",      progress = function() return Stat("enemyCapital") end },
-    { id = "session1", name = "Marathon",          xp = 300,  goal = 500,
+    { id = "session1", name = "Marathon",          xp = 150,  goal = 500,
       desc = "Jump 500 times in one session.",                progress = function() return Stat("bestSession") end },
-    { id = "session2", name = "Ultramarathon",     xp = 1000, goal = 2500,
+    { id = "session2", name = "Ultramarathon",     xp = 500,  goal = 2500,
       desc = "Jump 2,500 times in one session.",              progress = function() return Stat("bestSession") end },
-    { id = "sprint",   name = "Bunny Sprint",      xp = 300,  goal = 50,
+    { id = "sprint",   name = "Bunny Sprint",      xp = 150,  goal = 50,
       desc = "Jump 50 times within 60 seconds.",              progress = function() return Stat("bestMinute") end },
-    { id = "nodeath1", name = "Untouchable",       xp = 500,  goal = 1000,
+    { id = "nodeath1", name = "Untouchable",       xp = 250,  goal = 1000,
       desc = "Jump 1,000 times without dying.",               progress = function() return Stat("bestSinceDeath") end },
-    { id = "nodeath2", name = "Immortal Hopper",   xp = 2000, goal = 10000,
+    { id = "nodeath2", name = "Immortal Hopper",   xp = 1000, goal = 10000,
       desc = "Jump 10,000 times without dying.",              progress = function() return Stat("bestSinceDeath") end },
-    { id = "days1",    name = "Daily Hopper",      xp = 500,  goal = 7,
+    { id = "days1",    name = "Daily Hopper",      xp = 250,  goal = 7,
       desc = "Jump on 7 different days.",                     progress = function() return CountKeys(acct.stats.days) end },
-    { id = "days2",    name = "Devoted Hopper",    xp = 1500, goal = 30,
+    { id = "days2",    name = "Devoted Hopper",    xp = 750,  goal = 30,
       desc = "Jump on 30 different days.",                    progress = function() return CountKeys(acct.stats.days) end },
 
     -- 1.3.0: harder tiers of the challenges above...
-    { id = "mount3",   name = "Kangaroo Cavalry",  xp = 2000, goal = 10000,
+    { id = "mount3",   name = "Kangaroo Cavalry",  xp = 1000, goal = 10000,
       desc = "Jump 10,000 times while mounted.",              progress = function() return Stat("mounted") end },
-    { id = "swim2",    name = "Dolphin Leap",      xp = 750,  goal = 1000,
+    { id = "swim2",    name = "Dolphin Leap",      xp = 375,  goal = 1000,
       desc = "Jump 1,000 times at the surface of water.",     progress = function() return Stat("swim") end },
-    { id = "swim3",    name = "Flying Fish",       xp = 2000, goal = 5000,
+    { id = "swim3",    name = "Flying Fish",       xp = 1000, goal = 5000,
       desc = "Jump 5,000 times at the surface of water.",     progress = function() return Stat("swim") end },
-    { id = "ghost2",   name = "Restless Spirit",   xp = 750,  goal = 250,
+    { id = "ghost2",   name = "Restless Spirit",   xp = 375,  goal = 250,
       desc = "Jump 250 times as a ghost.",                    progress = function() return Stat("ghost") end },
-    { id = "combat2",  name = "Dodge Master",      xp = 1000, goal = 2500,
+    { id = "combat2",  name = "Dodge Master",      xp = 500,  goal = 2500,
       desc = "Jump 2,500 times in combat.",                   progress = function() return Stat("combat") end },
-    { id = "combat3",  name = "War Kangaroo",      xp = 2500, goal = 10000,
+    { id = "combat3",  name = "War Kangaroo",      xp = 1250, goal = 10000,
       desc = "Jump 10,000 times in combat.",                  progress = function() return Stat("combat") end },
-    { id = "dungeon2", name = "Raid Rabbit",       xp = 1500, goal = 5000,
+    { id = "dungeon2", name = "Raid Rabbit",       xp = 750,  goal = 5000,
       desc = "Jump 5,000 times inside dungeons or raids.",    progress = function() return Stat("instance") end },
-    { id = "party2",   name = "Conga Line",        xp = 750,  goal = 1000,
+    { id = "party2",   name = "Conga Line",        xp = 375,  goal = 1000,
       desc = "Jump 1,000 times in a full group of 5 or more.", progress = function() return Stat("group") end },
-    { id = "zones3",   name = "World Hopper",      xp = 2000, goal = 50,
+    { id = "zones3",   name = "World Hopper",      xp = 1000, goal = 50,
       desc = "Jump in 50 different zones.",                   progress = function() return CountKeys(acct.stats.zones) end },
-    { id = "session3", name = "Iron Legs",         xp = 3000, goal = 10000,
+    { id = "session3", name = "Iron Legs",         xp = 1500, goal = 10000,
       desc = "Jump 10,000 times in one session.",             progress = function() return Stat("bestSession") end },
-    { id = "sprint2",  name = "Turbo Bunny",       xp = 750,  goal = 65,
+    { id = "sprint2",  name = "Turbo Bunny",       xp = 375,  goal = 65,
       desc = "Jump 65 times within 60 seconds.",              progress = function() return Stat("bestMinute") end },
-    { id = "nodeath3", name = "Deathless Legend",  xp = 4000, goal = 25000,
+    { id = "nodeath3", name = "Deathless Legend",  xp = 2000, goal = 25000,
       desc = "Jump 25,000 times without dying.",              progress = function() return Stat("bestSinceDeath") end },
-    { id = "days3",    name = "Hopping Habit",     xp = 4000, goal = 100,
+    { id = "days3",    name = "Hopping Habit",     xp = 2000, goal = 100,
       desc = "Jump on 100 different days.",                   progress = function() return CountKeys(acct.stats.days) end },
-    { id = "week1",    name = "Weekly Warrior",    xp = 1500, goal = 10000,
+    { id = "week1",    name = "Weekly Warrior",    xp = 750,  goal = 10000,
       desc = "Jump 10,000 times in one week.",                progress = function() return Stat("bestWeek") end },
-    { id = "week2",    name = "Weekly Legend",     xp = 3000, goal = 25000,
+    { id = "week2",    name = "Weekly Legend",     xp = 1500, goal = 25000,
       desc = "Jump 25,000 times in one week.",                progress = function() return Stat("bestWeek") end },
 
     -- ...and new kinds.
-    { id = "streak1",  name = "On a Roll",         xp = 750,  goal = 7,
+    { id = "streak1",  name = "On a Roll",         xp = 375,  goal = 7,
       desc = "Jump every day for 7 days in a row.",           progress = function() return Stat("bestStreak") end },
-    { id = "streak2",  name = "Unbreakable Habit", xp = 3000, goal = 30,
+    { id = "streak2",  name = "Unbreakable Habit", xp = 1500, goal = 30,
       desc = "Jump every day for 30 days in a row.",          progress = function() return Stat("bestStreak") end },
-    { id = "resting",  name = "Inn Hopper",        xp = 300,  goal = 1000,
+    { id = "resting",  name = "Inn Hopper",        xp = 150,  goal = 1000,
       desc = "Jump 1,000 times while resting in an inn or city.", progress = function() return Stat("resting") end },
-    { id = "stealth",  name = "Sneaky Hop",        xp = 400,  goal = 100,
+    { id = "stealth",  name = "Sneaky Hop",        xp = 200,  goal = 100,
       desc = "Jump 100 times while stealthed.",               progress = function() return Stat("stealth") end },
-    { id = "shape",    name = "Shapeshifter Spring", xp = 400, goal = 500,
+    { id = "shape",    name = "Shapeshifter Spring", xp = 200, goal = 500,
       desc = "Jump 500 times in a druid form or Ghost Wolf.", progress = function() return Stat("shapeshift") end },
-    { id = "pvp",      name = "Battleground Bounce", xp = 750, goal = 250,
+    { id = "pvp",      name = "Battleground Bounce", xp = 375, goal = 250,
       desc = "Jump 250 times in a battleground.",             progress = function() return Stat("pvp") end },
-    { id = "night",    name = "Night Owl",         xp = 500,  goal = 500,
+    { id = "night",    name = "Night Owl",         xp = 250,  goal = 500,
       desc = "Jump 500 times between midnight and 4 AM.",     progress = function() return Stat("night") end },
     -- (Was "below 20% health in combat" - health is a hidden "secret" value
     -- in combat on Forever, so addons can't read it. Same id, so anyone who
     -- already completed it keeps it.)
-    { id = "lowhp",    name = "Living Dangerously", xp = 750, goal = 500,
+    { id = "lowhp",    name = "Living Dangerously", xp = 375, goal = 500,
       desc = "Jump 500 times while flagged for PvP.",         progress = function() return Stat("pvpFlagged") end },
-    { id = "maxlevel", name = "Seasoned Hopper",   xp = 1500, goal = 5000,
+    { id = "maxlevel", name = "Seasoned Hopper",   xp = 750,  goal = 5000,
       desc = "Jump 5,000 times at max character level.",      progress = function() return Stat("maxLevel") end },
-    { id = "classes1", name = "Jack of All Hops",  xp = 1000, goal = 3,
+    { id = "classes1", name = "Jack of All Hops",  xp = 500,  goal = 3,
       desc = "Jump 100 times on characters of 3 different classes.", progress = function() return ClassCount() end },
-    { id = "classes2", name = "Master of Many",    xp = 2500, goal = 5,
+    { id = "classes2", name = "Master of Many",    xp = 1250, goal = 5,
       desc = "Jump 100 times on characters of 5 different classes.", progress = function() return ClassCount() end },
-    { id = "prestige1", name = "Born Again",       xp = 500,  goal = 5,
-      desc = "Reach Prestige 5.",                             progress = function() return acct.prestige end },
-    { id = "prestige2", name = "Star Collector",   xp = 1500, goal = 15,
+    { id = "prestige1", name = "Born Again",       xp = 250,  goal = 3,
+      desc = "Reach Prestige 3.",                             progress = function() return acct.prestige end },
+    { id = "prestige2", name = "Star Collector",   xp = 750,  goal = 8,
+      desc = "Reach Prestige 8.",                            progress = function() return acct.prestige end },
+    { id = "prestige3", name = "Constellation",    xp = 1500, goal = 15,
       desc = "Reach Prestige 15.",                            progress = function() return acct.prestige end },
-    { id = "prestige3", name = "Constellation",    xp = 3000, goal = 30,
-      desc = "Reach Prestige 30.",                            progress = function() return acct.prestige end },
 
     -- 1.5.0: jump duels.
-    { id = "duel1",    name = "Duelist",           xp = 300,  goal = 1,
+    { id = "duel1",    name = "Duelist",           xp = 150,  goal = 1,
       desc = "Win a jump duel.",                              progress = function() return acct.duelWins or 0 end },
-    { id = "duel2",    name = "Duel Champion",     xp = 1500, goal = 10,
+    { id = "duel2",    name = "Duel Champion",     xp = 750,  goal = 10,
       desc = "Win 10 jump duels.",                            progress = function() return acct.duelWins or 0 end },
-    { id = "duel3",    name = "Undisputed",        xp = 4000, goal = 50,
+    { id = "duel3",    name = "Undisputed",        xp = 2000, goal = 50,
       desc = "Win 50 jump duels.",                            progress = function() return acct.duelWins or 0 end },
 
     -- 1.8.0: the crown (most jumps in an hour).
-    { id = "crown1",   name = "Crowned",           xp = 300,  goal = 1,
+    { id = "crown1",   name = "Crowned",           xp = 150,  goal = 1,
       desc = "Win the crown: most jumps in an hour.",         progress = function() return acct.crowns or 0 end },
-    { id = "crown2",   name = "Royal Leaper",      xp = 1500, goal = 10,
+    { id = "crown2",   name = "Royal Leaper",      xp = 750,  goal = 10,
       desc = "Win the crown 10 times.",                       progress = function() return acct.crowns or 0 end },
-    { id = "crown3",   name = "Jump Monarch",      xp = 4000, goal = 50,
+    { id = "crown3",   name = "Jump Monarch",      xp = 2000, goal = 50,
       desc = "Win the crown 50 times.",                       progress = function() return acct.crowns or 0 end },
 
     -- 1.8.2: daily challenges.
-    { id = "daily1",   name = "Daily Hopper",      xp = 500,  goal = 10,
+    { id = "daily1",   name = "Daily Hopper",      xp = 250,  goal = 10,
       desc = "Complete 10 daily challenges.",                 progress = function() return acct.dailyDone or 0 end },
-    { id = "daily2",   name = "Creature of Habit", xp = 3000, goal = 100,
+    { id = "daily2",   name = "Creature of Habit", xp = 1500, goal = 100,
       desc = "Complete 100 daily challenges.",                progress = function() return acct.dailyDone or 0 end },
 }
 
@@ -1482,8 +1505,18 @@ local function UpdateCounter()
     if not counterFrame then return end
     local me = Me()
     counterFrame.total:SetText(BreakUpLargeNumbers(me.total))
-    counterFrame.session:SetText(("Week: %s  Session: %s"):format(
+    local level, into, need = EntryLevel(me)
+    counterFrame.level:SetText(PrestigeTag(EntryPrestige(me)) .. "Level " .. level)
+    counterFrame.bar:SetMinMaxValues(0, need)
+    counterFrame.bar:SetValue(into)
+    counterFrame.session:SetText(("Week %s  Session %s"):format(
         BreakUpLargeNumbers(MyWeekCount(me)), BreakUpLargeNumbers(sessionJumps)))
+    -- Our place by total jumps: everyone with more than us, plus one.
+    local place = 1
+    for key, data in pairs(JumpCounterDB.peers) do
+        if (data.total or 0) > me.total and not JumpCounterDB.chars[key] then place = place + 1 end
+    end
+    counterFrame.place:SetText("#" .. place)
 end
 
 local function MakeMovable(frame, savedKey)
@@ -1605,9 +1638,10 @@ end
 
 local function CreateCounterFrame()
     local f = CreateFrame("Frame", "JumpCounterFrame", UIParent, "BackdropTemplate")
-    f:SetSize(160, 50)
+    f:SetSize(176, 58)
     f:SetBackdrop(BACKDROP)
-    f:SetBackdropColor(0, 0, 0, 0.7)
+    f:SetBackdropColor(0.03, 0.03, 0.08, 0.85)
+    f:SetBackdropBorderColor(0.6, 0.6, 0.6)
     f:SetFrameStrata("MEDIUM")
 
     local pos = JumpCounterDB.ui.pos
@@ -1618,15 +1652,28 @@ local function CreateCounterFrame()
     end
     MakeMovable(f, "pos")
 
-    local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("TOP", 0, -7)
-    label:SetText("Jumps")
+    -- Total (gold, large) and jump level on the first line, a thin XP bar,
+    -- then week / session and our place on the leaderboard.
+    f.total = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    f.total:SetPoint("TOPLEFT", 10, -8)
+    f.level = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.level:SetPoint("TOPRIGHT", -10, -11)
 
-    f.total = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    f.total:SetPoint("TOP", label, "BOTTOM", 0, -1)
+    f.bar = CreateFrame("StatusBar", nil, f)
+    f.bar:SetHeight(5)
+    f.bar:SetPoint("TOPLEFT", 10, -27)
+    f.bar:SetPoint("TOPRIGHT", -10, -27)
+    f.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    f.bar:SetStatusBarColor(0.58, 0.0, 0.55)
+    local barBg = f.bar:CreateTexture(nil, "BACKGROUND")
+    barBg:SetPoint("TOPLEFT", -1, 1)
+    barBg:SetPoint("BOTTOMRIGHT", 1, -1)
+    barBg:SetColorTexture(0, 0, 0, 0.8)
 
     f.session = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    f.session:SetPoint("TOP", f.total, "BOTTOM", 0, -1)
+    f.session:SetPoint("TOPLEFT", f.bar, "BOTTOMLEFT", 0, -5)
+    f.place = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.place:SetPoint("TOPRIGHT", f.bar, "BOTTOMRIGHT", 0, -5)
 
     f:SetScript("OnMouseUp", function(_, button)
         if button == "RightButton" then
@@ -1819,16 +1866,21 @@ function OnPeerScore(key, oldTotal, newTotal, class, oldPrestige, newPrestige, o
     local level = data and data.charLevel
     if level and oldCharLevel and level > oldCharLevel and settings.friendLevels
         and (level >= 30 or math.floor(level / 10) > math.floor(oldCharLevel / 10)) then
+        -- "is now a level 42 Warrior" - the class makes it clear it's the
+        -- character's level, not the jump level.
         local maxLevel = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 60
-        if level >= maxLevel then
-            Notify(("%s reached max level (%d)!"):format(ColoredName(key, class), level), true)
-        else
-            Notify(("%s reached level %d!"):format(ColoredName(key, class), level))
-        end
+        local className = class and LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[class]
+        local what = className and ("a level %d %s"):format(level, className)
+            or ("character level %d"):format(level)
+        Notify(("%s is now %s%s"):format(ColoredName(key, class), what,
+            level >= maxLevel and " - max level!" or "!"), level >= maxLevel)
     end
     if newPrestige and newPrestige > (oldPrestige or 0) and settings.friendRankUps then
-        Notify(("%s reached Prestige %d |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t!")
-            :format(ColoredName(key, class), newPrestige))
+        -- A new tier (bronze, silver...) is a big one.
+        local tier, tierName = PrestigeTier(newPrestige)
+        local newTier = tier > (PrestigeTier(oldPrestige))
+        Notify(("%s reached Prestige %d %s%s"):format(ColoredName(key, class), newPrestige,
+            PrestigeIcon(newPrestige), newTier and (" - %s tier!"):format(tierName) or "!"), newTier)
     end
     if newTotal <= oldTotal then return end
     local name = ColoredName(key, class)
@@ -1887,9 +1939,10 @@ local function DoPrestige()
     acct.prestigeSpent = acct.prestigeSpent + PRESTIGE_XP
     knownLevel = EntryLevel(Me())
     dirty = true
-    Notify(GOLD:format(("Prestige %d |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t! "
-        .. "Your jump level starts over - total jumps and ranks are kept.")
-        :format(acct.prestige)), true)
+    local tier, tierName = PrestigeTier(acct.prestige)
+    Notify(GOLD:format(("Prestige %d %s%s Your jump level starts over - total jumps and ranks are kept.")
+        :format(acct.prestige, PrestigeIcon(acct.prestige),
+            tier > (PrestigeTier(acct.prestige - 1)) and (" - %s tier!"):format(tierName) or "!")), true)
     CheckChallenges()                 -- prestige challenges
     RefreshBoardSoon()
 end
@@ -3201,37 +3254,15 @@ end
 -- Overview tab: your "character sheet" - level, rank, XP and your numbers.
 ---------------------------------------------------------------------------
 local function BuildOverviewTab(page, width)
-    local nameText = page:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    nameText:SetPoint("TOPLEFT", 4, -6)
-    local levelText = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    levelText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -5)
-    local nextRankText = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    nextRankText:SetPoint("TOPRIGHT", -4, -8)
-    nextRankText:SetJustifyH("RIGHT")
-
-    -- XP bar, styled like the game's experience bar.
-    local xpBar = CreateFrame("StatusBar", nil, page)
-    xpBar:SetHeight(16)
-    xpBar:SetPoint("TOPLEFT", 4, -54)
-    xpBar:SetPoint("TOPRIGHT", -126, -54)
-    xpBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    xpBar:SetStatusBarColor(0.58, 0.0, 0.55)
-    local xpBg = xpBar:CreateTexture(nil, "BACKGROUND")
-    xpBg:SetAllPoints()
-    xpBg:SetColorTexture(0, 0, 0, 0.6)
-    for _, side in ipairs({ { "TOPLEFT", "TOPRIGHT" }, { "BOTTOMLEFT", "BOTTOMRIGHT" } }) do
-        local edge = xpBar:CreateTexture(nil, "OVERLAY")
-        edge:SetColorTexture(0.6, 0.5, 0.3, 0.8)
-        edge:SetHeight(1)
-        edge:SetPoint(side[1], -1, side[1]:find("TOP") and 1 or -1)
-        edge:SetPoint(side[2], 1, side[2]:find("TOP") and 1 or -1)
-    end
-    xpBar.text = xpBar:CreateFontString(nil, "OVERLAY", "TextStatusBarText")
-    xpBar.text:SetPoint("CENTER", 0, 1)
+    -- Your name, jump level and XP bar are in the window's header (on every
+    -- tab); here: the next rank on the left, prestige on the right.
+    local nextRankText = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    nextRankText:SetPoint("TOPLEFT", 4, -8)
+    nextRankText:SetJustifyH("LEFT")
 
     local prestigeButton = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
     prestigeButton:SetSize(112, 22)
-    prestigeButton:SetPoint("TOPRIGHT", -4, -51)
+    prestigeButton:SetPoint("TOPRIGHT", -4, -3)
     prestigeButton:SetText("Prestige!")
     prestigeButton:SetScript("OnClick", function() AskPrestige() end)
     prestigeButton:SetScript("OnEnter", function(self)
@@ -3242,9 +3273,8 @@ local function BuildOverviewTab(page, width)
         GameTooltip:Show()
     end)
     prestigeButton:SetScript("OnLeave", GameTooltip_Hide)
-    local prestigeInfo = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    prestigeInfo:SetPoint("TOPRIGHT", -4, -56)
-    prestigeInfo:SetWidth(118)
+    local prestigeInfo = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    prestigeInfo:SetPoint("TOPRIGHT", -4, -8)
     prestigeInfo:SetJustifyH("RIGHT")
 
     -- Two columns of stat rows, like the Character window's stats.
@@ -3252,13 +3282,13 @@ local function BuildOverviewTab(page, width)
     local ROW_H = 20
     local function Column(x, title, defs)
         local head = SectionTitle(page, title)
-        head:SetPoint("TOPLEFT", x, -92)
+        head:SetPoint("TOPLEFT", x, -38)
         head.line:SetWidth(colW)
         local rows = {}
         for i, d in ipairs(defs) do
             local r = CreateFrame("Frame", nil, page)
             r:SetSize(colW, ROW_H)
-            r:SetPoint("TOPLEFT", x, -110 - (i - 1) * ROW_H)
+            r:SetPoint("TOPLEFT", x, -56 - (i - 1) * ROW_H)
             if i % 2 == 1 then
                 local bg = r:CreateTexture(nil, "BACKGROUND")
                 bg:SetAllPoints()
@@ -3342,19 +3372,11 @@ local function BuildOverviewTab(page, width)
         me = Me()
         standings = BuildStandings("all")
         myPos = MyRank()
-        local prestige = EntryPrestige(me)
-        nameText:SetText(PrestigeTag(prestige) .. FactionIcon(MyFaction()) .. ColoredName(playerKey, charData.class))
-        local level, into, need = EntryLevel(me)
-        local rankTitle = GetJumpRank(me.total)
-        levelText:SetText(("Jump level |cffffffff%d|r  %s"):format(level,
-            rankTitle and ("|cffffd100" .. rankTitle .. "|r") or GRAY:format("no rank yet")))
         local nextTitle, nextAt = NextJumpRank(me.total)
         nextRankText:SetText(nextTitle
-            and ("Next rank: |cffffd100%s|r\n%s jumps to go"):format(nextTitle, Fmt(nextAt - me.total))
-            or "Highest rank reached!")
-        xpBar:SetMinMaxValues(0, need)
-        xpBar:SetValue(into)
-        xpBar.text:SetText(("XP %s / %s"):format(Fmt(into), Fmt(need)))
+            and ("|cffffd100Next rank:|r %s  |cff999999-  %s jumps to go|r"):format(nextTitle,
+                Fmt(nextAt - me.total))
+            or "|cffffd100Highest rank reached!|r")
         if CanPrestige() then
             prestigeButton:Show()
             prestigeInfo:Hide()
@@ -3362,7 +3384,8 @@ local function BuildOverviewTab(page, width)
             prestigeButton:Hide()
             prestigeInfo:Show()
             local pct = math.floor(math.max(0, EntryXP(me) - PrestigeSpent(me)) / PRESTIGE_XP * 100)
-            prestigeInfo:SetText(("Prestige at level %d\n%d%% there"):format(PRESTIGE_LEVEL, math.min(pct, 99)))
+            prestigeInfo:SetText(("|cffffd100Prestige|r at jump level %d  |cff999999-  %d%% there|r"):format(
+                PRESTIGE_LEVEL, math.min(pct, 99)))
         end
         for _, r in ipairs(left) do r.value:SetText(r.get()) end
         for _, r in ipairs(right) do r.value:SetText(r.get()) end
@@ -3447,14 +3470,26 @@ local function BuildLeaderboardTab(page, width)
         local h = CreateFrame("Button", nil, page)
         h:SetSize(col.width - 2, HEAD_H)
         h:SetPoint("TOPLEFT", x, 0)
+        -- A bronze plate with a light top edge and a dark bottom edge, like
+        -- the column buttons of the Who and Guild lists.
         local bg = h:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetColorTexture(0.25, 0.2, 0.1, 0.55)
+        bg:SetColorTexture(0.30, 0.23, 0.11, 0.9)
         h.bg = bg
+        local top = h:CreateTexture(nil, "BORDER")
+        top:SetColorTexture(0.62, 0.5, 0.28, 0.9)
+        top:SetHeight(1)
+        top:SetPoint("TOPLEFT")
+        top:SetPoint("TOPRIGHT")
+        local bottom = h:CreateTexture(nil, "BORDER")
+        bottom:SetColorTexture(0, 0, 0, 0.9)
+        bottom:SetHeight(1)
+        bottom:SetPoint("BOTTOMLEFT")
+        bottom:SetPoint("BOTTOMRIGHT")
         local hl = h:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
         hl:SetColorTexture(1, 0.82, 0, 0.15)
-        h.text = h:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        h.text = h:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         h.text:SetPoint("LEFT", 5, 0)
         h.text:SetPoint("RIGHT", -5, 0)
         h.text:SetJustifyH(col.justify)
@@ -3502,7 +3537,7 @@ local function BuildLeaderboardTab(page, width)
     end
 
     local function MakeRow(y)
-        local row = { cells = {} }
+        local row = { cells = {}, y = y }
         row.hover = CreateFrame("Button", nil, page)
         row.hover:SetPoint("TOPLEFT", 0, y + 3)
         row.hover:SetPoint("TOPRIGHT", -24, y + 3)
@@ -3515,6 +3550,13 @@ local function BuildLeaderboardTab(page, width)
             row.cells[i] = Cell(row, i, xOff, y, i == 2 and "GameFontHighlight" or "GameFontHighlightSmall")
             xOff = xOff + col.width
         end
+        -- Places 1-3: the number sits on a gold, silver or bronze medal
+        -- (our own images - see Media\Media.lua; plain coloured numbers
+        -- until the game has been restarted).
+        row.medal = page:CreateTexture(nil, "ARTWORK")      -- under the number (an OVERLAY text)
+        row.medal:SetSize(16, 16)
+        row.medal:SetPoint("TOPRIGHT", page, "TOPLEFT", BOARD_COLUMNS[1].width - 3, y + 3)
+        row.medal:Hide()
         row.hover:SetScript("OnEnter", function(self)
             if row.entry then ShowEntryTooltip(self, row.entry) end
         end)
@@ -3523,6 +3565,7 @@ local function BuildLeaderboardTab(page, width)
         function row:Set(pos, entry, sort, stripe)
             row.entry = entry
             row.hover:SetShown(entry ~= nil)
+            row.medal:Hide()
             if not entry then
                 for _, c in ipairs(row.cells) do c:SetText("") end
                 return
@@ -3539,7 +3582,22 @@ local function BuildLeaderboardTab(page, width)
                 return (key == sort or v == 0) and s or ("|cffc8c8c8" .. s .. "|r")
             end
             local c = row.cells
-            c[1]:SetText(pos and GRAY:format(pos .. ".") or "")
+            if pos and pos <= 3 and JumpCounter_MediaLoaded then
+                row.medal:SetTexture("Interface\\AddOns\\JumpCounter\\Media\\medal" .. pos)
+                row.medal:Show()
+                c[1]:SetWidth(16)
+                c[1]:SetJustifyH("CENTER")
+                c[1]:SetPoint("TOPLEFT", BOARD_COLUMNS[1].width - 19, row.y)
+                c[1]:SetShadowOffset(0, 0)
+                c[1]:SetText("|cff2a1600" .. pos .. "|r")
+            else
+                c[1]:SetWidth(BOARD_COLUMNS[1].width - 10)
+                c[1]:SetJustifyH("RIGHT")
+                c[1]:SetPoint("TOPLEFT", 5, row.y)
+                c[1]:SetShadowOffset(1, -1)
+                local medal = pos and ({ "|cffffd100", "|cffd0d8e6", "|cffe0915a" })[pos]
+                c[1]:SetText(pos and (medal and (medal .. pos .. ".|r") or GRAY:format(pos .. ".")) or "")
+            end
             c[2]:SetText(FactionIcon(data.faction)
                 .. (entry.key == crownKey and CROWN_ICON or "") .. ColoredName(entry.key, entry.class))
             c[3]:SetText(PrestigeTag(EntryPrestige(data)) .. ((sort == "level") and "" or "|cffc8c8c8")
@@ -3590,10 +3648,16 @@ local function BuildLeaderboardTab(page, width)
     divider:SetPoint("TOPRIGHT", -24, listTop - 6 - listHeight)
     page.meRow = MakeRow(listTop - 12 - listHeight)
 
+    -- Bottom line: how far it is to the player above you (right), and the
+    -- number of players with a note about the column (left).
+    page.gap = page:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    page.gap:SetPoint("BOTTOMRIGHT", -2, 2)
+    page.gap:SetJustifyH("RIGHT")
     page.footer = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     page.footer:SetPoint("BOTTOMLEFT", 2, 2)
-    page.footer:SetPoint("BOTTOMRIGHT", -2, 2)
+    page.footer:SetPoint("RIGHT", page.gap, "LEFT", -12, 0)
     page.footer:SetJustifyH("LEFT")
+    page.footer:SetWordWrap(false)
 
     function page:Update()
         local list = self.list or {}
@@ -3618,7 +3682,7 @@ local function BuildLeaderboardTab(page, width)
         for _, h in ipairs(headers) do
             local on = h.col.sort == mode
             h.line:SetShown(on)
-            h.text:SetTextColor(on and 1 or 0.85, on and 0.82 or 0.85, on and 0 or 0.85)
+            h.text:SetTextColor(1, on and 1 or 0.82, on and 1 or 0)
         end
         if self.scrollOffsetReset then
             self.scrollOffsetReset = nil
@@ -3644,17 +3708,66 @@ local function BuildLeaderboardTab(page, width)
             wins = "jump duels won",
         })[mode] or "click a column to sort - hover a player for details"
         self.footer:SetText(count .. "  -  " .. note)
+
+        -- The gap to the player above (or your lead), in the sorted column.
+        local unit = ({ all = "jumps", hour = "jumps this hour", week = "jumps this week", level = "XP",
+            duels = "duel points", wins = "wins" })[mode]
+        local gap = ""
+        local mine = self.myEntry and self.myEntry[mode]
+        if unit and mine and self.myPos then
+            local other = self.list[self.myPos > 1 and self.myPos - 1 or 2]
+            local theirs = other and other[mode]
+            if theirs then
+                local name = ColoredName(other.key, other.class)
+                if self.myPos > 1 then
+                    gap = theirs > mine and ("%s %s behind %s"):format(Fmt(theirs - mine), unit, name)
+                        or ("level with %s"):format(name)
+                elseif mine > theirs then
+                    gap = ("In the lead, %s %s ahead of %s"):format(Fmt(mine - theirs), unit, name)
+                end
+            end
+        end
+        self.gap:SetText(gap)
     end
 end
 
 ---------------------------------------------------------------------------
 -- Challenges tab: rows like the Achievements window.
 ---------------------------------------------------------------------------
-local function BuildChallengesTab(page, width)
-    local ROW_H = 50
-    local DAILY_TOP, DAILY_ROW = -22, 30
+-- An icon for each kind of challenge (the id without its number). All of
+-- them are icons the game has had since the start; anything not listed
+-- gets the addon's own icon.
+local CHALLENGE_ICONS = {
+    mount = "Ability_Mount_RidingHorse", swim = "Spell_Frost_SummonWaterElemental",
+    ghost = "Spell_Holy_Resurrection", combat = "Ability_Warrior_OffensiveStance",
+    dungeon = "INV_Misc_Head_Dragon_01", party = "INV_Misc_GroupLooking", zones = "INV_Misc_Map_01",
+    capitals = "INV_BannerPVP_02", enemycap = "Ability_Rogue_Disguise", session = "INV_Misc_PocketWatch_01",
+    sprint = "Ability_Rogue_Sprint", nodeath = "Spell_Holy_DivineIntervention", days = "INV_Misc_Book_09",
+    week = "INV_Misc_PocketWatch_02", streak = "Spell_Fire_Fire", resting = "INV_Misc_Rune_01",
+    stealth = "Ability_Stealth", shape = "Ability_Druid_CatForm", pvp = "INV_BannerPVP_01",
+    night = "Spell_Nature_Sleep", lowhp = "Ability_DualWield", maxlevel = "Spell_Holy_SurgeOfLight",
+    classes = "INV_Misc_Book_11", prestige = "Spell_Holy_MagicalSentry", duel = "Ability_Parry",
+    crown = "INV_Crown_01", daily = "INV_Misc_Note_01",
+}
 
-    -- Today's three daily challenges.
+local function BuildChallengesTab(page, width)
+    local ROW_H = 48
+    local DAILY_TOP, DAILY_ROW = -22, 28
+    local BAR_W = 190
+
+    -- A progress bar with a dark frame, like the bars in the Achievements window.
+    local function Bar(parent, w, h)
+        local bar = ProgressBar(parent, h, 0.1, 0.6, 0.1)
+        bar:SetWidth(w)
+        local frame = bar:CreateTexture(nil, "BACKGROUND", nil, -1)
+        frame:SetPoint("TOPLEFT", -1, 1)
+        frame:SetPoint("BOTTOMRIGHT", 1, -1)
+        frame:SetColorTexture(0.45, 0.38, 0.22, 0.9)
+        return bar
+    end
+
+    -- Today's three daily challenges: a stripe in the tier's colour, the
+    -- task, a bar and the reward.
     local todayTitle = SectionTitle(page, "Today's challenges")
     todayTitle:SetPoint("TOPLEFT", 4, -2)
     todayTitle.line:SetWidth(width - 8)
@@ -3663,31 +3776,30 @@ local function BuildChallengesTab(page, width)
     local daily = {}
     for i = 1, 3 do
         local r = CreateFrame("Frame", nil, page)
-        r:SetSize(width - 8, DAILY_ROW - 4)
+        r:SetSize(width - 8, DAILY_ROW - 3)
         r:SetPoint("TOPLEFT", 4, DAILY_TOP - (i - 1) * DAILY_ROW)
         r.bg = r:CreateTexture(nil, "BACKGROUND")
         r.bg:SetAllPoints()
+        r.stripe = r:CreateTexture(nil, "BORDER")
+        r.stripe:SetPoint("TOPLEFT")
+        r.stripe:SetPoint("BOTTOMLEFT")
+        r.stripe:SetWidth(3)
         r.tier = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        r.tier:SetPoint("LEFT", 8, 0)
-        r.tier:SetWidth(56)
+        r.tier:SetPoint("LEFT", 12, 0)
+        r.tier:SetWidth(54)
         r.tier:SetJustifyH("LEFT")
-        r.desc = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.desc:SetPoint("LEFT", 66, 0)
-        r.bar = CreateFrame("StatusBar", nil, r)
-        r.bar:SetSize(150, 12)
-        r.bar:SetPoint("RIGHT", -84, 0)
-        r.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-        local bbg = r.bar:CreateTexture(nil, "BACKGROUND")
-        bbg:SetAllPoints()
-        bbg:SetColorTexture(0, 0, 0, 0.6)
-        r.bar.text = r.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.bar.text:SetPoint("CENTER")
+        r.desc = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        r.desc:SetPoint("LEFT", 70, 0)
+        r.xp = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        r.xp:SetPoint("RIGHT", -10, 0)
+        r.xp:SetWidth(70)
+        r.xp:SetJustifyH("RIGHT")
+        r.bar = Bar(r, BAR_W, 13)
+        r.bar:SetPoint("RIGHT", -90, 0)
         r.check = r:CreateTexture(nil, "OVERLAY")
         r.check:SetSize(16, 16)
-        r.check:SetPoint("RIGHT", -84 - 150 - 6, 0)
+        r.check:SetPoint("RIGHT", r.bar, "LEFT", -8, 0)
         r.check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
-        r.xp = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.xp:SetPoint("RIGHT", -8, 0)
         daily[i] = r
     end
 
@@ -3696,8 +3808,12 @@ local function BuildChallengesTab(page, width)
     local allTitle = SectionTitle(page, "Challenges")
     allTitle:SetPoint("TOPLEFT", 4, LIST_TOP)
     allTitle.line:SetWidth(width - 8)
+    -- How many are done, as a small bar next to the title.
+    local doneBar = Bar(page, 150, 11)
+    doneBar:SetPoint("LEFT", allTitle, "RIGHT", 14, 0)
+    doneBar:SetStatusBarColor(1, 0.82, 0)
     local summary = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    summary:SetPoint("LEFT", allTitle, "RIGHT", 12, 0)
+    summary:SetPoint("LEFT", doneBar, "RIGHT", 10, 0)
 
     local hide = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
     hide:SetSize(22, 22)
@@ -3717,6 +3833,8 @@ local function BuildChallengesTab(page, width)
     content:SetSize(width - 28, #CHALLENGES * ROW_H)
     scroll:SetScrollChild(content)
 
+    -- One row: icon | name and what to do | reward above the progress bar
+    -- (or the day it was completed).
     local rows = {}
     for i, c in ipairs(CHALLENGES) do
         local r = CreateFrame("Frame", nil, content)
@@ -3727,35 +3845,35 @@ local function BuildChallengesTab(page, width)
         r.border:SetPoint("TOPLEFT")
         r.border:SetPoint("BOTTOMLEFT")
         r.border:SetWidth(3)
+        -- The icon in a thin frame (gold once the challenge is done).
+        r.iconEdge = r:CreateTexture(nil, "BORDER")
+        r.iconEdge:SetSize(36, 36)
+        r.iconEdge:SetPoint("LEFT", 9, 0)
         r.icon = r:CreateTexture(nil, "ARTWORK")
-        r.icon:SetSize(36, 36)
-        r.icon:SetPoint("LEFT", 8, 0)
-        r.icon:SetTexture(MINIMAP_ICON)
+        r.icon:SetSize(32, 32)
+        r.icon:SetPoint("CENTER", r.iconEdge)
+        local kind = c.id:gsub("%d+$", "")
+        r.icon:SetTexture(CHALLENGE_ICONS[kind] and ("Interface\\Icons\\" .. CHALLENGE_ICONS[kind]) or MINIMAP_ICON)
         r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
         r.check = r:CreateTexture(nil, "OVERLAY")
         r.check:SetSize(16, 16)
-        r.check:SetPoint("BOTTOMRIGHT", r.icon, "BOTTOMRIGHT", 4, -4)
+        r.check:SetPoint("BOTTOMRIGHT", r.iconEdge, "BOTTOMRIGHT", 5, -4)
         r.check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
         r.name = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        r.name:SetPoint("TOPLEFT", r.icon, "TOPRIGHT", 10, 0)
-        r.reward = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.reward:SetPoint("TOPRIGHT", -8, -6)
+        r.name:SetPoint("TOPLEFT", r.iconEdge, "TOPRIGHT", 10, -3)
         r.desc = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.desc:SetPoint("TOPLEFT", r.name, "BOTTOMLEFT", 0, -3)
+        r.desc:SetPoint("BOTTOMLEFT", r.iconEdge, "BOTTOMRIGHT", 10, 4)
+        r.desc:SetPoint("RIGHT", r, "RIGHT", -(BAR_W + 24), 0)
+        r.desc:SetJustifyH("LEFT")
+        r.desc:SetWordWrap(false)
         r.desc:SetText(c.desc)
-        r.bar = CreateFrame("StatusBar", nil, r)
-        r.bar:SetHeight(12)
-        r.bar:SetPoint("BOTTOMLEFT", r.icon, "BOTTOMRIGHT", 10, 0)
-        r.bar:SetWidth(220)
-        r.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+        r.reward = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        r.reward:SetPoint("TOPRIGHT", -10, -6)
+        r.bar = Bar(r, BAR_W, 13)
+        r.bar:SetPoint("BOTTOMRIGHT", -10, 7)
         r.bar:SetMinMaxValues(0, c.goal)
-        local barBg = r.bar:CreateTexture(nil, "BACKGROUND")
-        barBg:SetAllPoints()
-        barBg:SetColorTexture(0, 0, 0, 0.6)
-        r.bar.text = r.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.bar.text:SetPoint("CENTER", 0, 0)
         r.status = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        r.status:SetPoint("BOTTOMRIGHT", -8, 6)
+        r.status:SetPoint("BOTTOMRIGHT", -10, 8)
         r.challenge = c
         rows[i] = r
     end
@@ -3763,13 +3881,21 @@ local function BuildChallengesTab(page, width)
     function page:Refresh()
         local hideDone = JumpCounterDB.ui.hideDone
         hide:SetChecked(hideDone)
-        summary:SetText(("%d / %d complete, +%s XP")
-            :format(CountCompleted(acct), #CHALLENGES, Fmt(acct.challengeXP)))
+        local completed = CountCompleted(acct)
+        doneBar:SetMinMaxValues(0, #CHALLENGES)
+        doneBar:SetValue(completed)
+        doneBar.text:SetText(("%d / %d"):format(completed, #CHALLENGES))
+        summary:SetText(("complete  |cff999999-|r  |cffffd100+%s XP|r earned"):format(Fmt(acct.challengeXP)))
 
         resets:SetText("New challenges in " .. FormatDuration(Daily.SecondsLeft()))
         for i, d in ipairs(Daily.List()) do
             local r = daily[i]
             r.tier:SetText(d.color .. d.label .. "|r")
+            -- The stripe takes the tier's colour ("|cffRRGGBB").
+            local hr, hg, hb = d.color:match("|cff(%x%x)(%x%x)(%x%x)")
+            if hr then
+                r.stripe:SetColorTexture(tonumber(hr, 16) / 255, tonumber(hg, 16) / 255, tonumber(hb, 16) / 255, 0.9)
+            end
             r.desc:SetText(d.desc)
             r.xp:SetText("+" .. d.xp .. " XP")
             r.bar:SetMinMaxValues(0, d.goal)
@@ -3806,24 +3932,30 @@ local function BuildChallengesTab(page, width)
             local done = acct.done[c.id]
             local p = math.min(c.progress(), c.goal)
             r.reward:SetText("+" .. Fmt(c.xp) .. " XP")
+            r.name:SetText(c.name)
             if done then
                 r.bg:SetColorTexture(0.35, 0.28, 0.05, 0.35)
                 r.border:SetColorTexture(1, 0.82, 0, 0.9)
+                r.iconEdge:SetColorTexture(1, 0.82, 0, 0.9)
                 r.icon:SetDesaturated(false)
                 r.icon:SetAlpha(1)
                 r.check:Show()
-                r.name:SetText(c.name)
                 r.name:SetTextColor(1, 0.82, 0)
+                r.desc:SetTextColor(0.8, 0.8, 0.8)
+                r.reward:SetTextColor(1, 0.82, 0)
                 r.bar:Hide()
                 r.status:SetText("Completed " .. date("%Y-%m-%d", done))
             else
                 r.bg:SetColorTexture(1, 1, 1, 0.04)
                 r.border:SetColorTexture(0.5, 0.5, 0.5, 0.5)
-                r.icon:SetDesaturated(true)
-                r.icon:SetAlpha(0.7)
+                r.iconEdge:SetColorTexture(0.35, 0.35, 0.35, 0.9)
+                -- Started ones are in colour; untouched ones are greyed out.
+                r.icon:SetDesaturated(p == 0)
+                r.icon:SetAlpha(p == 0 and 0.6 or 1)
                 r.check:Hide()
-                r.name:SetText(c.name)
-                r.name:SetTextColor(0.9, 0.9, 0.9)
+                r.name:SetTextColor(1, 1, 1)
+                r.desc:SetTextColor(0.75, 0.75, 0.75)
+                r.reward:SetTextColor(0.7, 0.7, 0.7)
                 r.bar:Show()
                 r.bar:SetValue(p)
                 r.bar:SetStatusBarColor(0.1, 0.6, 0.1)
@@ -4002,11 +4134,27 @@ local function CreateMainFrame()
         content:SetPoint("BOTTOMRIGHT", -8, 8)
     end
 
-    -- The strip between title and content: version / update notice.
-    local strip = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    strip:SetPoint("TOPLEFT", 66, -36)
-    strip:SetPoint("TOPRIGHT", -12, -36)
+    -- The strip between title and content, on every tab: who you are, your
+    -- jump level, and an XP bar (plus the update notice when there is one).
+    local strip = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    strip:SetPoint("TOPRIGHT", -12, -27)
     strip:SetJustifyH("RIGHT")
+    local who = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    who:SetPoint("TOPLEFT", 66, -27)
+    who:SetPoint("RIGHT", strip, "LEFT", -10, 0)
+    who:SetJustifyH("LEFT")
+    who:SetWordWrap(false)
+    local headBar = ProgressBar(f, 11, 0.58, 0.0, 0.55)
+    headBar:SetPoint("TOPLEFT", 68, -45)
+    headBar:SetPoint("TOPRIGHT", -14, -45)
+    headBar.text:SetFontObject("TextStatusBarText")
+    for _, side in ipairs({ "TOP", "BOTTOM" }) do
+        local edge = headBar:CreateTexture(nil, "OVERLAY")
+        edge:SetColorTexture(0.6, 0.5, 0.3, 0.8)
+        edge:SetHeight(1)
+        edge:SetPoint(side .. "LEFT", -1, side == "TOP" and 1 or -1)
+        edge:SetPoint(side .. "RIGHT", 1, side == "TOP" and 1 or -1)
+    end
 
     -- Pages.
     local PAD = 10
@@ -4086,8 +4234,16 @@ local function CreateMainFrame()
 
     function f:RefreshHeader()
         local newer = NewestVersion()
-        strip:SetText(newer and ("|cffff5555Update available: v%s|r - /jumps update"):format(newer)
-            or GRAY:format("v" .. VERSION))
+        local me = Me()
+        local level, into, need = EntryLevel(me)
+        local rankTitle = GetJumpRank(me.total)
+        who:SetText(FactionIcon(MyFaction()) .. ColoredName(playerKey, charData.class)
+            .. (rankTitle and ("  |cffffffff<%s>|r"):format(rankTitle) or "")
+            .. (newer and ("   |cffff5555Update available: v%s|r |cff999999(/jumps update)|r"):format(newer) or ""))
+        strip:SetText(PrestigeTag(EntryPrestige(me)) .. "Jump level |cffffd100" .. level .. "|r")
+        headBar:SetMinMaxValues(0, need)
+        headBar:SetValue(into)
+        headBar.text:SetText(("XP %s / %s"):format(Fmt(into), Fmt(need)))
         if portrait and SetPortraitTexture then pcall(SetPortraitTexture, portrait, "player") end
     end
 
@@ -4367,18 +4523,26 @@ events:SetScript("OnEvent", function(_, event, ...)
         CreateMainFrame()
         CreateOptionsPanel()
         CreateMinimapButton()
-        -- 1.8.3: prestige was rebalanced - recalculate our stars from total
-        -- XP, once.
+        -- 1.8.3 / 1.8.6: prestige was rebalanced - recalculate our stars
+        -- from total XP, once. 1.8.6 also halved challenge rewards: the XP of
+        -- the challenges already done is worked out again from the list
+        -- (duel, crown and daily XP stay as they are).
         if (acct.prestigeModel or 1) < PRESTIGE_MODEL then
-            local before = acct.prestige or 0
+            local before, xpBefore = acct.prestige or 0, EntryXP(Me())
+            local cxp = 0
+            for _, c in ipairs(CHALLENGES) do
+                if acct.done[c.id] then cxp = cxp + c.xp end
+            end
+            acct.challengeXP = cxp
             local stars = StarsForXP(EntryXP(Me()))
             acct.prestige, acct.prestigeSpent, acct.prestigeModel = stars, stars * PRESTIGE_XP, PRESTIGE_MODEL
             dirty = true
-            if stars ~= before or before > 0 then
+            if before > 0 or xpBefore > 0 then
                 C_Timer.After(6, function()
-                    Print(GOLD:format(("Prestige has been rebalanced: your stars were recalculated from your "
-                        .. "total XP. You now have %d prestige %s. %s"):format(stars,
-                        stars == 1 and "star" or "stars", PrestigeTag(stars))))
+                    Print(GOLD:format(("Prestige has been rebalanced: stars now come at jump level %d, and "
+                        .. "challenges give half the XP (also the ones you've done). Your stars were "
+                        .. "recalculated from your total XP: %d prestige %s, jump level %d."):format(
+                        PRESTIGE_LEVEL, stars, stars == 1 and "star" or "stars", (EntryLevel(Me())))))
                 end)
             end
         end

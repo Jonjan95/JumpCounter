@@ -28,11 +28,14 @@ OPEN IT
   Everything is in that one window. Your name, rank, jump level and XP bar
   are always at the top, with tabs along the bottom:
 
-    Overview     your next rank and all your numbers. A "Prestige!" button
-                 appears here at level 100.
+    Overview     your big numbers, your next rank and the challenges you're
+                 closest to, your jumps over the last 7 days, your records
+                 and all your numbers. A "Prestige!" button appears here at
+                 level 100.
     Leaderboard  everyone you can see: level, title, total jumps, this hour,
-                 this week, average per hour, deaths, duel rank and wins. Click
-                 a column header to sort by it,
+                 this week, average per hour, deaths, duel rank and wins. It
+                 opens sorted by this hour; click a column header to sort
+                 by another (your choice is remembered), and
                  hover a player for all their details. Your own row is
                  always shown at the bottom, and the bottom line tells you
                  how far it is to the player above you.
@@ -72,8 +75,9 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
   prestige moved from level 50 to 100 and challenge rewards were halved,
   also for challenges already done; everyone's stars were recalculated from
   their total XP, so the same XP always means the same stars.)
-  Your star changes look as you collect more of them. (The star and medal
-  images are new in v1.8.6: restart the game once after updating to see
+  Your star changes look as you collect more of them. (The addon's own
+  images - stars and medals in v1.8.6, the duel figures in v1.8.7 - are
+  only found when the game starts: restart it once after updating to see
   them.)
 
   There are lots of challenges to find - open the Challenges tab to see
@@ -85,12 +89,15 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
 
 JUMP DUELS
   Now and then two players who are jumping around get paired for a
-  30-second jump duel: a small window counts down and shows both scores,
-  and whoever jumps most wins bonus XP. Everyone online with the addon
+  30-second jump duel: a window shows the two of you - portrait, name and
+  score on each side, and a little figure for each that hops when that
+  player jumps - and whoever jumps most wins bonus XP. Everyone online with the addon
   sees the result in chat. The more of you are jumping, the more often
   duels happen: at most one every 10 minutes for you, and the same two
   players once per 30 minutes (also with /jumps duel). Turn them off (or
   the results of others' duels) in Settings. No duels while swimming.
+  Hopping on the spot against a tree or a wall counts no faster than
+  normal jumping (v1.8.7).
   Both players need v1.7.0 or newer.
 
   DUEL RANKS: duels are rated, like chess. Win and you take duel points

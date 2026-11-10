@@ -537,6 +537,56 @@ local CHALLENGES = {
       desc = "Complete 10 daily challenges.",                 progress = function() return acct.dailyDone or 0 end },
     { id = "daily2",   name = "Creature of Habit", xp = 1500, goal = 100,
       desc = "Complete 100 daily challenges.",                progress = function() return acct.dailyDone or 0 end },
+
+    -- 1.8.7: eleven new kinds. Most count from the update on.
+    { id = "hour1",    name = "Power Hour",        xp = 250,  goal = 1000,
+      desc = "Jump 1,000 times in one hour.",                 progress = function() return Stat("bestHour") end },
+    { id = "hour2",    name = "Hour of Power",     xp = 750,  goal = 2500,
+      desc = "Jump 2,500 times in one hour.",                 progress = function() return Stat("bestHour") end },
+    { id = "air1",     name = "Hang Time",         xp = 125,  goal = 2,
+      desc = "Stay in the air for 2 seconds after a jump - and survive.",
+      progress = function() return math.floor(Stat("bestAir")) end },
+    { id = "air2",     name = "Leap of Faith",     xp = 500,  goal = 5,
+      desc = "Stay in the air for 5 seconds after a jump - and survive.",
+      progress = function() return math.floor(Stat("bestAir")) end },
+    { id = "clock1",   name = "Half a Day",        xp = 250,  goal = 12,
+      desc = "Jump in 12 different hours of the day.",        progress = function() return CountKeys(acct.stats.hours) end },
+    { id = "clock2",   name = "Around the Clock",  xp = 1000, goal = 24,
+      desc = "Jump in all 24 hours of the day.",              progress = function() return CountKeys(acct.stats.hours) end },
+    { id = "indoor1",  name = "House Hopper",      xp = 125,  goal = 500,
+      desc = "Jump 500 times indoors.",                       progress = function() return Stat("indoors") end },
+    { id = "indoor2",  name = "Cabin Fever",       xp = 500,  goal = 5000,
+      desc = "Jump 5,000 times indoors.",                     progress = function() return Stat("indoors") end },
+    { id = "tour1",    name = "Dungeon Tourist",   xp = 250,  goal = 5,
+      desc = "Jump in 5 different dungeons or raids.",        progress = function() return CountKeys(acct.stats.instances) end },
+    { id = "tour2",    name = "Seen It All",       xp = 750,  goal = 15,
+      desc = "Jump in 15 different dungeons or raids.",       progress = function() return CountKeys(acct.stats.instances) end },
+    { id = "perfect1", name = "Perfect Day",       xp = 250,  goal = 1,
+      desc = "Complete all three daily challenges on the same day.",
+      progress = function() return Stat("perfectDays") end },
+    { id = "perfect2", name = "Perfect Week",      xp = 1000, goal = 7,
+      desc = "Complete all three daily challenges on 7 different days.",
+      progress = function() return Stat("perfectDays") end },
+    { id = "winrow1",  name = "Hot Streak",        xp = 375,  goal = 3,
+      desc = "Win 3 jump duels in a row.",                    progress = function() return Stat("bestWinStreak") end },
+    { id = "winrow2",  name = "Unstoppable",       xp = 1000, goal = 5,
+      desc = "Win 5 jump duels in a row.",                    progress = function() return Stat("bestWinStreak") end },
+    { id = "burst1",   name = "Quick Feet",        xp = 250,  goal = 30,
+      desc = "Jump 30 times in a single jump duel.",          progress = function() return Stat("bestDuel") end },
+    { id = "burst2",   name = "Blur",              xp = 750,  goal = 40,
+      desc = "Jump 40 times in a single jump duel.",          progress = function() return Stat("bestDuel") end },
+    { id = "pass1",    name = "Overtaker",         xp = 250,  goal = 10,
+      desc = "Pass other players on the leaderboard 10 times.", progress = function() return Stat("overtakes") end },
+    { id = "pass2",    name = "Fast Lane",         xp = 1000, goal = 50,
+      desc = "Pass other players on the leaderboard 50 times.", progress = function() return Stat("overtakes") end },
+    { id = "crowd1",   name = "Among Friends",     xp = 125,  goal = 10,
+      desc = "Have 10 other players on your leaderboard.",    progress = function() return CountKeys(JumpCounterDB.peers) end },
+    { id = "crowd2",   name = "Crowd Pleaser",     xp = 500,  goal = 25,
+      desc = "Have 25 other players on your leaderboard.",    progress = function() return CountKeys(JumpCounterDB.peers) end },
+    { id = "level1",   name = "Halfway There",     xp = 500,  goal = 50,
+      desc = "Reach jump level 50.",                          progress = function() return Stat("bestLevel") end },
+    { id = "level2",   name = "Top of the Ladder", xp = 1500, goal = 100,
+      desc = "Reach jump level 100.",                         progress = function() return Stat("bestLevel") end },
 }
 
 local function CountCompleted(data)
@@ -1506,10 +1556,10 @@ local function UpdateCounter()
     local me = Me()
     counterFrame.total:SetText(BreakUpLargeNumbers(me.total))
     local level, into, need = EntryLevel(me)
-    counterFrame.level:SetText(PrestigeTag(EntryPrestige(me)) .. "Level " .. level)
+    counterFrame.level:SetText(PrestigeTag(EntryPrestige(me)) .. "|cffffffffLevel " .. level .. "|r")
     counterFrame.bar:SetMinMaxValues(0, need)
     counterFrame.bar:SetValue(into)
-    counterFrame.session:SetText(("Week %s  Session %s"):format(
+    counterFrame.session:SetText(("Week |cffffffff%s|r   Session |cffffffff%s|r"):format(
         BreakUpLargeNumbers(MyWeekCount(me)), BreakUpLargeNumbers(sessionJumps)))
     -- Our place by total jumps: everyone with more than us, plus one.
     local place = 1
@@ -1542,6 +1592,34 @@ local BACKDROP = {
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 },
 }
+
+-- The look of the small windows (on-screen counter, duel): dark like the main
+-- window, a gold-bronze edge, and a bronze title plate across the top like
+-- the leaderboard's column headers. Returns the plate's text.
+local function StyleBox(f, title)
+    f:SetBackdrop(BACKDROP)
+    f:SetBackdropColor(0.06, 0.05, 0.04, 0.92)
+    f:SetBackdropBorderColor(0.78, 0.62, 0.3)
+    local plate = f:CreateTexture(nil, "BORDER")
+    plate:SetPoint("TOPLEFT", 4, -4)
+    plate:SetPoint("TOPRIGHT", -4, -4)
+    plate:SetHeight(17)
+    plate:SetColorTexture(0.30, 0.23, 0.11, 0.9)
+    local shine = f:CreateTexture(nil, "ARTWORK")
+    shine:SetPoint("TOPLEFT", plate)
+    shine:SetPoint("TOPRIGHT", plate)
+    shine:SetHeight(1)
+    shine:SetColorTexture(0.62, 0.5, 0.28, 0.9)
+    local line = f:CreateTexture(nil, "ARTWORK")
+    line:SetPoint("BOTTOMLEFT", plate)
+    line:SetPoint("BOTTOMRIGHT", plate)
+    line:SetHeight(1)
+    line:SetColorTexture(0, 0, 0, 0.9)
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.title:SetPoint("TOP", 0, -7)
+    f.title:SetText(title or "")
+    return f.title
+end
 
 ---------------------------------------------------------------------------
 -- Update window: a new version is out, plus the CurseForge link to copy.
@@ -1638,10 +1716,8 @@ end
 
 local function CreateCounterFrame()
     local f = CreateFrame("Frame", "JumpCounterFrame", UIParent, "BackdropTemplate")
-    f:SetSize(176, 58)
-    f:SetBackdrop(BACKDROP)
-    f:SetBackdropColor(0.03, 0.03, 0.08, 0.85)
-    f:SetBackdropBorderColor(0.6, 0.6, 0.6)
+    f:SetSize(180, 78)
+    StyleBox(f)
     f:SetFrameStrata("MEDIUM")
 
     local pos = JumpCounterDB.ui.pos
@@ -1652,28 +1728,34 @@ local function CreateCounterFrame()
     end
     MakeMovable(f, "pos")
 
-    -- Total (gold, large) and jump level on the first line, a thin XP bar,
-    -- then week / session and our place on the leaderboard.
-    f.total = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    f.total:SetPoint("TOPLEFT", 10, -8)
-    f.level = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.level:SetPoint("TOPRIGHT", -10, -11)
+    -- On the title plate: tier star and jump level (left), our place on the
+    -- leaderboard (right). Then the total in big gold digits, an XP bar
+    -- framed like the main window's, and week / session.
+    f.title:Hide()
+    f.level = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.level:SetPoint("TOPLEFT", 10, -7)
+    f.place = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.place:SetPoint("TOPRIGHT", -10, -7)
+
+    f.total = f:CreateFontString(nil, "OVERLAY", GameFontNormalHuge and "GameFontNormalHuge" or "GameFontNormalLarge")
+    f.total:SetPoint("TOP", 0, -25)
 
     f.bar = CreateFrame("StatusBar", nil, f)
-    f.bar:SetHeight(5)
-    f.bar:SetPoint("TOPLEFT", 10, -27)
-    f.bar:SetPoint("TOPRIGHT", -10, -27)
+    f.bar:SetHeight(6)
+    f.bar:SetPoint("BOTTOMLEFT", 11, 23)
+    f.bar:SetPoint("BOTTOMRIGHT", -11, 23)
     f.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     f.bar:SetStatusBarColor(0.58, 0.0, 0.55)
+    local barEdge = f.bar:CreateTexture(nil, "BACKGROUND", nil, -1)
+    barEdge:SetPoint("TOPLEFT", -1, 1)
+    barEdge:SetPoint("BOTTOMRIGHT", 1, -1)
+    barEdge:SetColorTexture(0.45, 0.38, 0.22, 0.9)
     local barBg = f.bar:CreateTexture(nil, "BACKGROUND")
-    barBg:SetPoint("TOPLEFT", -1, 1)
-    barBg:SetPoint("BOTTOMRIGHT", 1, -1)
-    barBg:SetColorTexture(0, 0, 0, 0.8)
+    barBg:SetAllPoints()
+    barBg:SetColorTexture(0, 0, 0, 0.9)
 
     f.session = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    f.session:SetPoint("TOPLEFT", f.bar, "BOTTOMLEFT", 0, -5)
-    f.place = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.place:SetPoint("TOPRIGHT", f.bar, "BOTTOMRIGHT", 0, -5)
+    f.session:SetPoint("BOTTOM", 0, 9)
 
     f:SetScript("OnMouseUp", function(_, button)
         if button == "RightButton" then
@@ -1842,15 +1924,18 @@ local function CheckMyNotifications(newTotal)
         end
     end
 
-    if settings.overtakes then
-        -- Anyone sitting exactly on our previous total was just passed.
-        local passed = {}
-        for key, data in pairs(JumpCounterDB.peers) do
-            if data.total == newTotal - 1 and not JumpCounterDB.chars[key] and OvertakeAllowed(key) then
-                table.insert(passed, ColoredName(key, data.class))
-            end
+    -- Anyone sitting exactly on our previous total was just passed. Counted
+    -- (1.8.7, for challenges) even with the chat message turned off.
+    local passed
+    for key, data in pairs(JumpCounterDB.peers) do
+        if data.total == newTotal - 1 and not JumpCounterDB.chars[key] and OvertakeAllowed(key) then
+            passed = passed or {}
+            table.insert(passed, ColoredName(key, data.class))
         end
-        if #passed > 0 then
+    end
+    if passed then
+        acct.stats.overtakes = (acct.stats.overtakes or 0) + #passed
+        if settings.overtakes then
             Notify(("You passed %s! You're now #%d."):format(table.concat(passed, ", "), MyRank() or 0))
         end
     end
@@ -1969,6 +2054,10 @@ local function AskPrestige()
 end
 
 function CheckChallenges()
+    -- 1.8.7: the highest jump level reached (a star means you've been at the top).
+    -- (knownLevel: from the check before this one - no need to add it all up again)
+    acct.stats.bestLevel = math.max(acct.stats.bestLevel or 0, knownLevel or 0,
+        (acct.prestige or 0) > 0 and PRESTIGE_LEVEL or 0)
     local completed, xp = {}, 0
     for _, c in ipairs(CHALLENGES) do
         if not acct.done[c.id] and c.progress() >= c.goal then
@@ -2119,6 +2208,11 @@ do
                 acct.dailyXP = (acct.dailyXP or 0) + e.tier.xp
                 acct.dailyDone = (acct.dailyDone or 0) + 1
                 dirty = true
+                -- 1.8.7: all three on the same day is a "perfect day".
+                if not d.perfect and Daily.DoneCount() == #TIERS then
+                    d.perfect = true
+                    acct.stats.perfectDays = (acct.stats.perfectDays or 0) + 1
+                end
                 if settings.myProgress then
                     Notify(GOLD:format(("Daily challenge complete (%s): %s (+%d XP)")
                         :format(e.tier.label, e.def.desc, e.tier.xp)), true)
@@ -2190,10 +2284,19 @@ local function TrackJump(inWater)
     if plain(UnitAffectingCombat("player")) then inc("combat") end
     local inInstance, instanceType = IsInInstance()
     inInstance, instanceType = plain(inInstance), plain(instanceType)
-    if inInstance and (instanceType == "party" or instanceType == "raid") then inc("instance") end
+    if inInstance and (instanceType == "party" or instanceType == "raid") then
+        inc("instance")
+        -- 1.8.7: which dungeons and raids you've jumped in (by name).
+        local name = GetInstanceInfo and plain((GetInstanceInfo()))
+        if type(name) == "string" and name ~= "" then
+            st.instances = st.instances or {}
+            st.instances[name] = true
+        end
+    end
     if IsInGroup() and (plain(GetNumGroupMembers()) or 0) >= 5 then inc("group") end
     if inInstance and instanceType == "pvp" then inc("pvp") end
     if plain(IsResting()) then inc("resting") end
+    if IsIndoors and plain(IsIndoors()) then inc("indoors") end          -- 1.8.7
     if IsStealthed and plain(IsStealthed()) then inc("stealth") end
     if UnitIsPVP and plain(UnitIsPVP("player")) then inc("pvpFlagged") end
     -- Only druid forms and Ghost Wolf (warrior stances are "forms" too).
@@ -2201,6 +2304,10 @@ local function TrackJump(inWater)
     if (class == "DRUID" or class == "SHAMAN") and (plain(GetShapeshiftForm()) or 0) > 0 then inc("shapeshift") end
     local hour = tonumber(date("%H"))
     if hour and hour < 4 then inc("night") end
+    if hour then                      -- 1.8.7: the hours of the day you've jumped in
+        st.hours = st.hours or {}
+        st.hours[hour] = true
+    end
     local maxLevel = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 60
     if (plain(UnitLevel("player")) or 0) >= maxLevel then inc("maxLevel") end
 
@@ -2226,6 +2333,7 @@ local function TrackJump(inWater)
     st.bestWeek = math.max(st.bestWeek or 0, MyWeekCount())
 
     st.bestSession = math.max(st.bestSession or 0, sessionJumps)
+    st.bestHour = math.max(st.bestHour or 0, acct.hour or 0)             -- 1.8.7
 
     local now = GetTime()
     table.insert(minuteJumps, now)
@@ -2393,22 +2501,110 @@ do
         return list
     end
 
+    -- The duel window (1.8.7): you on the left, your opponent on the right -
+    -- a portrait, name and score each - "VS" and the clock between them, and
+    -- a bar underneath showing who is ahead.
+    -- A face for one side: the character's own portrait when the game can
+    -- see them (you always; the opponent when targeted or in your group and
+    -- nearby), otherwise the round icon of their class.
+    -- who: whose face it is. Once we have someone's real portrait it stays
+    -- for the rest of the duel, also when they go out of sight again.
+    local function SetFace(side, class, unit, who)
+        local tex = side.icon
+        if unit and SetPortraitTexture then
+            tex:SetTexCoord(0, 1, 0, 1)
+            if pcall(SetPortraitTexture, tex, unit) then
+                side.faceOf, side.faceKey = who, nil
+                return
+            end
+        end
+        if who and side.faceOf == who then return end      -- keep their portrait
+        side.faceOf = nil
+        local key = class or "?"
+        if side.faceKey == key then return end
+        side.faceKey = key
+        local c = class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
+        if c then
+            tex:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
+            tex:SetTexCoord(c[1], c[2], c[3], c[4])
+        else
+            tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        end
+    end
+
+    -- A unit we can see that is the opponent: same first name and class.
+    local function OpponentUnit(opp)
+        local first = opp.name and opp.name:match("^(%S+)")
+        if not first then return end
+        local function is(unit)
+            if not UnitExists(unit) then return false end
+            local name = Plain(UnitName(unit))
+            if name ~= first then return false end
+            local _, class = UnitClass(unit)
+            if opp.class and Plain(class) ~= opp.class then return false end
+            return not UnitIsVisible or Plain(UnitIsVisible(unit)) and true or false
+        end
+        -- Your target, focus or the player under the mouse; someone in your
+        -- group; or anyone close enough to have a nameplate.
+        if is("target") then return "target" end
+        if is("focus") then return "focus" end
+        if is("mouseover") then return "mouseover" end
+        if IsInRaid() then
+            for i = 1, 40 do if is("raid" .. i) then return "raid" .. i end end
+        elseif IsInGroup() then
+            for i = 1, 4 do if is("party" .. i) then return "party" .. i end end
+        end
+        for i = 1, 40 do if is("nameplate" .. i) then return "nameplate" .. i end end
+    end
+
+    -- Fills the window. timeText: the line in the middle (clock or result).
+    local function FillDuelFrame(d, timeText, colours)
+        local f = duelFrame
+        local mine, theirs = d.mine or 0, d.theirs or 0
+        f.me.name:SetText(ClassColored(DisplayName(playerKey), charData.class))
+        f.them.name:SetText(ClassColored(d.opp.name, d.opp.class))
+        local ahead, behind, level = "|cff33ff33%d|r", "|cffff5555%d|r", "|cffffffff%d|r"
+        f.me.score:SetText(((mine > theirs and ahead) or (mine < theirs and behind) or level):format(mine))
+        f.them.score:SetText(((theirs > mine and ahead) or (theirs < mine and behind) or level):format(theirs))
+        f.time:SetText(timeText)
+        -- The bar: your share of all the jumps so far (half each at 0 - 0).
+        f.bar:SetMinMaxValues(0, 1)
+        f.bar:SetValue((mine + theirs) > 0 and mine / (mine + theirs) or 0.5)
+        if f.Score then
+            f.Score(f.me, mine, charData.class)
+            f.Score(f.them, theirs, d.opp.class)
+        end
+        -- Portraits: yours is drawn once. The opponent is looked for at most
+        -- once a second, and not at all once their face has been found.
+        if f.me.faceOf ~= "me" then SetFace(f.me, charData.class, "player", "me") end
+        local who = d.opp.acct or d.opp.name
+        if f.them.faceOf ~= who then
+            local unit
+            local t = GetTime()
+            if t - (f.lookedAt or 0) >= 1 then
+                f.lookedAt = t
+                local ok, found = pcall(OpponentUnit, d.opp)
+                unit = ok and found or nil
+            end
+            SetFace(f.them, d.opp.class, unit, who)
+        end
+    end
+
     local function UpdateDuelFrame(now)
         local f = duelFrame
         if not f then return end
         if duel and duel.state == "on" then
-            f.title:SetText("Jump duel vs " .. ClassColored(duel.opp.name, duel.opp.class))
-            local mine, theirs = duel.mine, duel.theirs
-            local lead = mine > theirs and "|cff33ff33%d|r" or (mine < theirs and "|cffff5555%d|r" or "|cffffffff%d|r")
-            f.score:SetText(("You " .. lead .. "  -  %d"):format(mine, theirs))
+            local text
             if now < duel.start then
-                f.time:SetText(("Starts in %d..."):format(duel.start - now))
+                text = ("Starts in %d..."):format(duel.start - now)
             elseif now < duel.finish then
                 local left = duel.finish - now
-                f.time:SetText(("%d:%02d left - jump!"):format(math.floor(left / 60), left % 60))
+                text = ("|cffffd100%d:%02d|r  - jump!"):format(math.floor(left / 60), left % 60)
             else
-                f.time:SetText("Time! Waiting for the final score...")
+                text = "Time! Waiting for the final score..."
             end
+            FillDuelFrame(duel, text)
             f:Show()
         elseif f.resultUntil and now < f.resultUntil then
             f:Show()
@@ -2427,9 +2623,7 @@ do
         end
         if d.opp and d.opp.acct then acct.duelPairs[d.opp.acct] = now end
         if duelFrame then
-            duelFrame.title:SetText("Jump duel vs " .. ClassColored(d.opp.name, d.opp.class))
-            duelFrame.score:SetText(("You %d  -  %d"):format(d.mine, d.theirs))
-            duelFrame.time:SetText(text)
+            FillDuelFrame(d, text)
             duelFrame.resultUntil = now + 10
         end
     end
@@ -2456,6 +2650,10 @@ do
             if data.acct == d.opp.acct and data.duelPoints then theirPoints = data.duelPoints end
         end
         local result = (me > them and 1) or (me < them and 0) or 0.5
+        -- 1.8.7: best score in one duel, and wins in a row.
+        acct.stats.bestDuel = math.max(acct.stats.bestDuel or 0, me)
+        acct.winStreak = (result == 1) and (acct.winStreak or 0) + 1 or 0
+        acct.stats.bestWinStreak = math.max(acct.stats.bestWinStreak or 0, acct.winStreak)
         local change = DUEL_POINTS.Change(myPoints, theirPoints, result)
         local note = ""
         if change < 0 and myPoints < DUEL_POINTS.protected then
@@ -2689,9 +2887,8 @@ do
 
     function CreateDuelFrame()
         local f = CreateFrame("Frame", "JumpCounterDuelFrame", UIParent, "BackdropTemplate")
-        f:SetSize(250, 64)
-        f:SetBackdrop(BACKDROP)
-        f:SetBackdropColor(0, 0, 0, 0.8)
+        f:SetSize(390, 150)
+        StyleBox(f, "Jump duel")
         f:SetFrameStrata("HIGH")
         local pos = JumpCounterDB.ui.duelPos
         if pos then
@@ -2705,12 +2902,131 @@ do
             local point, _, relPoint, x, y = self:GetPoint()
             JumpCounterDB.ui.duelPos = { point, relPoint, x, y }
         end)
-        f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        f.title:SetPoint("TOP", 0, -8)
-        f.score = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-        f.score:SetPoint("TOP", f.title, "BOTTOM", 0, -3)
+
+        -- One side: portrait in a gold ring, name, and the score in big digits.
+        local big = GameFontNormalHuge and "GameFontNormalHuge" or "GameFontNormalLarge"
+        local function Side(left)
+            local s = {}
+            local corner, dir = left and "TOPLEFT" or "TOPRIGHT", left and 1 or -1
+            s.icon = f:CreateTexture(nil, "ARTWORK")
+            s.icon:SetSize(40, 40)
+            s.icon:SetPoint(corner, dir * 14, -30)
+            -- (our own ring image - see Media\Media2.lua; none until the game
+            -- has been restarted after the update that added it)
+            if JumpCounter_Media2 then
+                s.ring = f:CreateTexture(nil, "OVERLAY")
+                s.ring:SetSize(52, 52)
+                s.ring:SetPoint("CENTER", s.icon)
+                s.ring:SetTexture("Interface\\AddOns\\JumpCounter\\Media\\ring")
+            end
+            -- The name has its half of the window to itself (up to the
+            -- middle); a longer one is cut with "...". "VS" sits lower,
+            -- between the scores, so no name can run into it.
+            s.name = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            s.name:SetPoint(corner, dir * 64, -28)
+            s.name:SetSize(124, 14)
+            s.name:SetJustifyH(left and "LEFT" or "RIGHT")
+            s.name:SetWordWrap(false)
+            if s.name.SetMaxLines then s.name:SetMaxLines(1) end
+            s.score = f:CreateFontString(nil, "OVERLAY", big)
+            s.score:SetPoint(corner, dir * 64, -45)
+            s.score:SetWidth(90)
+            s.score:SetJustifyH(left and "LEFT" or "RIGHT")
+            return s
+        end
+        f.me, f.them = Side(true), Side(false)
+
+        f.vs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        f.vs:SetPoint("TOP", 0, -47)
+        f.vs:SetText("|cffff5540VS|r")
         f.time = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        f.time:SetPoint("TOP", f.score, "BOTTOM", 0, -3)
+        f.time:SetPoint("BOTTOM", 0, 9)
+        f.time:SetWidth(300)
+
+        -- Who is ahead: your jumps in green from the left, theirs in red.
+        f.bar = CreateFrame("StatusBar", nil, f)
+        f.bar:SetHeight(7)
+        f.bar:SetPoint("BOTTOMLEFT", 14, 27)
+        f.bar:SetPoint("BOTTOMRIGHT", -14, 27)
+        f.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+        f.bar:SetStatusBarColor(0.15, 0.7, 0.15)
+        local theirs = f.bar:CreateTexture(nil, "BACKGROUND")
+        theirs:SetAllPoints()
+        theirs:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
+        theirs:SetVertexColor(0.75, 0.15, 0.12)
+        local edge = f.bar:CreateTexture(nil, "BACKGROUND", nil, -1)
+        edge:SetPoint("TOPLEFT", -1, 1)
+        edge:SetPoint("BOTTOMRIGHT", 1, -1)
+        edge:SetColorTexture(0.45, 0.38, 0.22, 0.9)
+        local middle = f.bar:CreateTexture(nil, "OVERLAY")
+        middle:SetColorTexture(1, 0.82, 0, 0.9)
+        middle:SetSize(1, 11)
+        middle:SetPoint("CENTER")
+
+        -- Two little adventurers standing on the bar, in each player's class
+        -- colour, that hop whenever that player's score goes up. Our own
+        -- drawings (Media\figure.tga: four frames side by side - stand,
+        -- crouch, in the air, coming down - and figure_tint.tga with the
+        -- parts that take the class colour); see Media\Media2.lua.
+        if JumpCounter_Media2 then
+            local SIZE, HOP, TIME = 34, 20, 0.44
+            local function Figure(side, x, flip)
+                side.figTint = f:CreateTexture(nil, "ARTWORK", nil, 1)
+                side.figTint:SetTexture("Interface\\AddOns\\JumpCounter\\Media\\figure_tint")
+                side.fig = f:CreateTexture(nil, "ARTWORK", nil, 2)
+                side.fig:SetTexture("Interface\\AddOns\\JumpCounter\\Media\\figure")
+                side.hops = 0
+                function side.Pose(frame, y)
+                    local l, r = frame * 0.25, (frame + 1) * 0.25
+                    if flip then l, r = r, l end        -- the one on the right looks left
+                    side.figTint:SetTexCoord(l, r, 0, 1)
+                    side.figTint:SetPoint("BOTTOM", f.bar, "TOPLEFT", x, y)
+                    side.fig:SetTexCoord(l, r, 0, 1)
+                    side.fig:SetPoint("BOTTOM", f.bar, "TOPLEFT", x, y)
+                end
+                side.figTint:SetSize(SIZE, SIZE)
+                side.fig:SetSize(SIZE, SIZE)
+                side.Pose(0, 0)
+            end
+            local barW = 390 - 28
+            Figure(f.me, barW * 0.25, false)
+            Figure(f.them, barW * 0.75, true)
+
+            -- Runs only while someone is hopping.
+            local function Step(side, elapsed)
+                if not side.t and side.hops > 0 then
+                    side.hops, side.t = side.hops - 1, 0
+                end
+                if not side.t then return false end
+                side.t = side.t + elapsed
+                local p = side.t / TIME
+                if p >= 1 then
+                    side.t = nil
+                    side.Pose(0, 0)
+                elseif p < 0.15 then
+                    side.Pose(1, 0)                                 -- crouch
+                else
+                    local q = (p - 0.15) / 0.85                     -- up and down again
+                    side.Pose(q < 0.6 and 2 or 3, HOP * 4 * q * (1 - q))
+                end
+                return side.t ~= nil or side.hops > 0
+            end
+            local function Animate(self, elapsed)
+                local a, b = Step(self.me, elapsed), Step(self.them, elapsed)
+                if not (a or b) then self:SetScript("OnUpdate", nil) end
+            end
+            -- score: the side's new score; a higher one than before is a hop
+            -- (two at most waiting, so a burst of scores doesn't hop for ages).
+            function f.Score(side, score, class)
+                local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+                side.figTint:SetVertexColor(c and c.r or 1, c and c.g or 1, c and c.b or 1)
+                if side.last and score > side.last then
+                    side.hops = math.min(side.hops + 1, 2)
+                    f:SetScript("OnUpdate", Animate)
+                end
+                side.last = score
+            end
+        end
         f:Hide()
         duelFrame = f
     end
@@ -2897,6 +3213,7 @@ local airPress = {
     inAir = false,     -- falling and out of the water
     touchAt = nil,     -- when we came down onto the water from the air
     rehop = 0.15,      -- a hop out of the water must follow the touch this quickly
+    full = 0.82,       -- seconds a normal jump on flat ground takes
 }
 local groundTracker = CreateFrame("Frame")
 groundTracker:SetScript("OnUpdate", function()
@@ -2910,7 +3227,22 @@ groundTracker:SetScript("OnUpdate", function()
     end
     local now = GetTime()
     local wet = wasSwimming or Plain(IsSubmerged and IsSubmerged())
+    -- 1.8.7: how long a jump on land kept you in the air (jump off something
+    -- high). Landing dead doesn't count; flying or a flight path cancels it.
+    if airPress.jumpAt and falling then airPress.flew = true end
+    if airPress.jumpAt and (grounded or wet) then
+        local air = now - airPress.jumpAt
+        airPress.jumpAt = nil
+        -- Only a time we really saw: in the air on at least one frame.
+        airPress.lastAir = airPress.flew and air or nil
+        if acct and air > (acct.stats.bestAir or 0) and air < 120
+            and not (UnitIsDeadOrGhost and Plain(UnitIsDeadOrGhost("player"))) then
+            acct.stats.bestAir = air
+            if air >= 2 then CheckChallenges() end
+        end
+    end
     if Plain(IsFlying()) or Plain(UnitOnTaxi("player")) then
+        airPress.jumpAt, airPress.lastAir = nil, nil
         airPress.inAir, airPress.touchAt, airPress.pressAt = false, nil, nil
     elseif falling and not wet then
         -- Out of the water and in the air: a surface hop, if it follows a
@@ -2957,9 +3289,27 @@ local function OnJump()
 end
 
 function airPress.Count(inWater, now)
-    -- Too soon after the last counted jump to be a full jump.
-    if not inWater and now - lastJumpTime < JUMP_MIN_INTERVAL then return end
+    if not inWater then
+        -- Too soon after the last counted jump to be a full jump.
+        local since = now - lastJumpTime
+        if since < JUMP_MIN_INTERVAL then return end
+        -- 1.8.7: the short interval is for real jumps that land early (running
+        -- uphill: 0.55 s or more in the air). A hop that came down sooner than
+        -- that - stuck against a tree, a wall or a ledge - doesn't let you
+        -- jump again sooner than a normal jump would (airPress.full). One
+        -- such hop on its own is let through (clipping a ledge while
+        -- running); from the second in a row the rule applies.
+        local air = airPress.lastAir
+        if airPress.jumpAt and airPress.flew then air = now - airPress.jumpAt end
+        local short = air ~= nil and air < JUMP_MIN_INTERVAL
+        if short and airPress.shortBefore and since < airPress.full then return end
+        airPress.shortBefore = short
+    else
+        airPress.shortBefore = false
+    end
     lastJumpTime = now
+    -- Timed until you land (1.8.7), for the rule above and the air time record.
+    airPress.jumpAt, airPress.flew, airPress.lastAir = (not inWater) and now or nil, false, nil
 
     charData.total = charData.total + 1
     sessionJumps = sessionJumps + 1
@@ -3255,14 +3605,100 @@ end
 ---------------------------------------------------------------------------
 local function BuildOverviewTab(page, width)
     -- Your name, jump level and XP bar are in the window's header (on every
-    -- tab); here: the next rank on the left, prestige on the right.
-    local nextRankText = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    nextRankText:SetPoint("TOPLEFT", 4, -8)
-    nextRankText:SetJustifyH("LEFT")
+    -- tab). Here (1.8.7): four big numbers, what's next (rank, prestige and
+    -- the challenges you're closest to), your last 7 days, records, and the
+    -- rest of your numbers.
+    local me, standings, myPos
+    local ROW_H = 20
 
-    local prestigeButton = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
-    prestigeButton:SetSize(112, 22)
-    prestigeButton:SetPoint("TOPRIGHT", -4, -3)
+    local function Tip(frame, title, text)
+        frame:EnableMouse(true)
+        frame:SetScript("OnEnter", function(self)
+            local t, body = title, text
+            if type(t) == "function" then t, body = t() end
+            if not t then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(t)
+            if body then GameTooltip:AddLine(body, 1, 1, 1, true) end
+            GameTooltip:Show()
+        end)
+        frame:SetScript("OnLeave", GameTooltip_Hide)
+    end
+
+    -- Four tiles across the top.
+    local TILE_H = 46
+    local tileW = math.floor((width - 8 - 3 * 8) / 4)
+    local tiles = {}
+    local function Tile(label, get, tip)
+        local i = #tiles + 1
+        local t = CreateFrame("Frame", nil, page)
+        t:SetSize(tileW, TILE_H)
+        t:SetPoint("TOPLEFT", 4 + (i - 1) * (tileW + 8), -4)
+        local bg = t:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(1, 1, 1, 0.05)
+        for _, side in ipairs({ "TOP", "BOTTOM" }) do
+            local edge = t:CreateTexture(nil, "BORDER")
+            edge:SetColorTexture(0.6, 0.5, 0.3, side == "TOP" and 0.7 or 0.25)
+            edge:SetHeight(1)
+            edge:SetPoint(side .. "LEFT")
+            edge:SetPoint(side .. "RIGHT")
+        end
+        t.value = t:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        t.value:SetPoint("TOP", 0, -7)
+        t.label = t:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        t.label:SetPoint("BOTTOM", 0, 6)
+        t.label:SetText(label)
+        t.get = get
+        if tip then Tip(t, label, tip) end
+        tiles[i] = t
+    end
+    Tile("Total jumps", function() return Fmt(me.total) end)
+    Tile("Leaderboard", function()
+        return myPos and ("#%d |cff999999of %d|r"):format(myPos, #standings) or "-" end)
+    Tile("Average per hour", function()
+        local jph = JumpsPerHour(me)
+        return jph and Fmt(jph) or GRAY:format(("%d / 30 min"):format(math.floor(me.rate.seconds / 60)))
+    end, "Jumps per hour of online time over the last 7 days (time flagged AFK doesn't count).")
+    Tile("Duel rank", function()
+        return (DuelRank(acct.duelPoints)), ("Duel rank  -  %d wins"):format(acct.duelWins or 0)
+    end, "Duel points: win and you take points from your opponent, lose and they take yours - more "
+        .. "for beating someone stronger, less for losing to them. No losses below Contender, and "
+        .. "after 3 losses in a row the next one is free.")
+
+    -- "Next up": the next rank and the four challenges closest to done. (How
+    -- far it is to prestige is the XP bar in the header; the second line
+    -- becomes "Prestige - Ready!" with its button once you can.)
+    local TOP = -4 - TILE_H - 12
+    local leftW = math.floor((width - 8) * 0.56)
+    local rightX = 4 + leftW + 18
+    local rightW = width - 4 - rightX
+    local nextTitle = SectionTitle(page, "Next up")
+    nextTitle:SetPoint("TOPLEFT", 4, TOP)
+    nextTitle.line:SetWidth(leftW)
+    local SLOT_H = 34
+    local slots = {}
+    for i = 1, 5 do
+        local s = CreateFrame("Frame", nil, page)
+        s:SetSize(leftW, SLOT_H - 2)
+        s:SetPoint("TOPLEFT", 4, TOP - 22 - (i - 1) * SLOT_H)
+        s.left = s:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        s.left:SetPoint("TOPLEFT", 2, 0)
+        s.right = s:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        s.right:SetPoint("TOPRIGHT", -2, 0)
+        s.bar = ProgressBar(s, 13, 0.1, 0.6, 0.1)
+        s.bar:SetPoint("BOTTOMLEFT", 2, 3)
+        s.bar:SetPoint("BOTTOMRIGHT", -2, 3)
+        local frame = s.bar:CreateTexture(nil, "BACKGROUND", nil, -1)
+        frame:SetPoint("TOPLEFT", -1, 1)
+        frame:SetPoint("BOTTOMRIGHT", 1, -1)
+        frame:SetColorTexture(0.45, 0.38, 0.22, 0.9)
+        Tip(s, function() return s.tipTitle, s.tipText end)
+        slots[i] = s
+    end
+    local prestigeButton = CreateFrame("Button", nil, slots[2], "UIPanelButtonTemplate")
+    prestigeButton:SetSize(96, 18)
+    prestigeButton:SetPoint("TOPRIGHT", 0, 3)
     prestigeButton:SetText("Prestige!")
     prestigeButton:SetScript("OnClick", function() AskPrestige() end)
     prestigeButton:SetScript("OnEnter", function(self)
@@ -3273,22 +3709,14 @@ local function BuildOverviewTab(page, width)
         GameTooltip:Show()
     end)
     prestigeButton:SetScript("OnLeave", GameTooltip_Hide)
-    local prestigeInfo = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    prestigeInfo:SetPoint("TOPRIGHT", -4, -8)
-    prestigeInfo:SetJustifyH("RIGHT")
 
-    -- Two columns of stat rows, like the Character window's stats.
-    local colW = math.floor((width - 24) / 2)
-    local ROW_H = 20
-    local function Column(x, title, defs)
-        local head = SectionTitle(page, title)
-        head:SetPoint("TOPLEFT", x, -38)
-        head.line:SetWidth(colW)
+    -- Rows of "label ... value", like the Character window's stats.
+    local function Rows(x, y, w, defs)
         local rows = {}
         for i, d in ipairs(defs) do
             local r = CreateFrame("Frame", nil, page)
-            r:SetSize(colW, ROW_H)
-            r:SetPoint("TOPLEFT", x, -56 - (i - 1) * ROW_H)
+            r:SetSize(w, ROW_H)
+            r:SetPoint("TOPLEFT", x, y - (i - 1) * ROW_H)
             if i % 2 == 1 then
                 local bg = r:CreateTexture(nil, "BACKGROUND")
                 bg:SetAllPoints()
@@ -3299,45 +3727,29 @@ local function BuildOverviewTab(page, width)
             r.label:SetText(d.label)
             r.value = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             r.value:SetPoint("RIGHT", -8, 0)
-            if d.tip then
-                r:EnableMouse(true)
-                r:SetScript("OnEnter", function(self)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:AddLine(d.label)
-                    GameTooltip:AddLine(d.tip, 1, 1, 1, true)
-                    GameTooltip:Show()
-                end)
-                r:SetScript("OnLeave", GameTooltip_Hide)
-            end
+            if d.tip then Tip(r, d.label, d.tip) end
             r.get = d.get
             rows[i] = r
         end
         return rows
     end
 
-    local me, standings, myPos
-    local left = Column(4, "Jumps", {
-        { label = "Total jumps", get = function() return Fmt(me.total) end },
+    -- The rest of your numbers, in two columns under "Next up".
+    local MORE_TOP = TOP - 22 - 5 * SLOT_H - 8
+    local moreTitle = SectionTitle(page, "Your numbers")
+    moreTitle:SetPoint("TOPLEFT", 4, MORE_TOP)
+    moreTitle.line:SetWidth(leftW)
+    local halfW = math.floor((leftW - 10) / 2)
+    local numbersA = Rows(4, MORE_TOP - 20, halfW, {
         { label = "This session", get = function() return Fmt(sessionJumps) end },
         { label = "This hour", get = function()
             return (crownKey == playerKey and CROWN_ICON or "") .. Fmt(HourCount(me)) end,
           tip = "Your jumps since the hour started. Whoever has the most holds the crown." },
-        { label = "This week", get = function()
-            local secs = SecondsUntilReset()
-            return Fmt(MyWeekCount(me)) .. (secs and GRAY:format(" (resets in " .. FormatDuration(secs) .. ")") or "")
-          end },
-        { label = "Avg / hour", get = function()
-            local jph = JumpsPerHour(me)
-            return jph and Fmt(jph) or GRAY:format(("%d / 30 min online"):format(math.floor(me.rate.seconds / 60)))
-          end,
-          tip = "Jumps per hour of online time over the last 7 days (time flagged AFK doesn't count)." },
-        { label = "Best minute", get = function() return Fmt(acct.stats.bestMinute or 0) end },
+        { label = "This week", get = function() return Fmt(MyWeekCount(me)) end },
         { label = "Deaths", get = function() return Fmt(me.deaths) end },
         { label = "Jumps since last death", get = function() return Fmt(acct.stats.sinceDeath or 0) end },
     })
-    local right = Column(colW + 20, "Progress", {
-        { label = "Leaderboard", get = function()
-            return myPos and ("#%d of %d"):format(myPos, #standings) or "-" end },
+    local numbersB = Rows(4 + halfW + 10, MORE_TOP - 20, halfW, {
         { label = "Total XP", get = function() return Fmt(EntryXP(me)) end },
         { label = "Challenges", get = function()
             return ("%d / %d"):format(CountCompleted(acct), #CHALLENGES) end },
@@ -3346,19 +3758,58 @@ local function BuildOverviewTab(page, width)
           tip = "Three new challenges every day - easy, medium and hard - for extra XP. See the Challenges tab." },
         { label = "Crowns won", get = function() return Fmt(acct.crowns or 0) end,
           tip = "Hours you finished with the most jumps of everyone you can see." },
-        { label = "Duel rank", get = function()
-            local title, nextTitle, nextAt = DuelRank(acct.duelPoints)
-            return ("%s |cff999999(%d wins)|r"):format(title, acct.duelWins or 0) end,
-          tip = "Duel points: win and you take points from your opponent, lose and they take yours - more "
-              .. "for beating someone stronger, less for losing to them. No losses below Contender, and "
-              .. "after 3 losses in a row the next one is free." },
-        { label = "Prestige", get = function()
-            local p = EntryPrestige(me)
-            return p > 0 and (PrestigeTag(p)) or GRAY:format("at level " .. PRESTIGE_LEVEL) end },
         { label = "Characters", get = function() return tostring(CountKeys(JumpCounterDB.chars)) end },
+    })
+    -- "This week" builds its tooltip when shown (the time left changes).
+    Tip(numbersA[3], function()
+        local secs = SecondsUntilReset()
+        return "This week", secs and ("Resets in " .. FormatDuration(secs) .. ".") or "Weeks start Monday 00:00 UTC."
+    end)
+
+    -- Last 7 days: a bar for each day's jumps, today in gold.
+    local dayTitle = SectionTitle(page, "Last 7 days")
+    dayTitle:SetPoint("TOPLEFT", rightX, TOP)
+    dayTitle.line:SetWidth(rightW)
+    local CHART_H = 70
+    local BASE = TOP - 22 - 14 - CHART_H          -- the bars stand on this line
+    local colW = math.floor(rightW / RATE_DAYS)
+    local days = {}
+    for i = 1, RATE_DAYS do
+        local d = {}
+        d.bar = page:CreateTexture(nil, "ARTWORK")
+        d.bar:SetPoint("BOTTOM", page, "TOPLEFT", rightX + (i - 0.5) * colW, BASE)
+        d.bar:SetWidth(math.max(8, colW - 12))
+        d.value = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        d.value:SetPoint("BOTTOM", d.bar, "TOP", 0, 2)
+        d.day = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        d.day:SetPoint("TOP", page, "TOPLEFT", rightX + (i - 0.5) * colW, BASE - 4)
+        days[i] = d
+    end
+    local baseLine = page:CreateTexture(nil, "ARTWORK")
+    baseLine:SetColorTexture(0.6, 0.5, 0.3, 0.6)
+    baseLine:SetHeight(1)
+    baseLine:SetPoint("TOPLEFT", rightX, BASE)
+    baseLine:SetWidth(rightW)
+
+    -- Records.
+    local REC_TOP = BASE - 26
+    local recTitle = SectionTitle(page, "Records")
+    recTitle:SetPoint("TOPLEFT", rightX, REC_TOP)
+    recTitle.line:SetWidth(rightW)
+    local records = Rows(rightX, REC_TOP - 20, rightW, {
+        { label = "Best minute", get = function() return Fmt(acct.stats.bestMinute or 0) end },
+        { label = "Best hour", get = function() return Fmt(acct.stats.bestHour or 0) end,
+          tip = "Your most jumps in one hour (counted since version 1.8.7)." },
+        { label = "Best session", get = function() return Fmt(acct.stats.bestSession or 0) end },
+        { label = "Best week", get = function() return Fmt(acct.stats.bestWeek or 0) end },
         { label = "Best day streak", get = function()
             local n = acct.stats.bestStreak or 0
             return n .. (n == 1 and " day" or " days") end },
+        { label = "Longest time in the air", get = function()
+            local air = acct.stats.bestAir or 0
+            return air > 0 and ("%.1f s"):format(air) or GRAY:format("-") end,
+          tip = "The longest a jump kept you in the air - and you survived the landing "
+              .. "(counted since version 1.8.7)." },
     })
 
     local hint = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3368,27 +3819,106 @@ local function BuildOverviewTab(page, width)
     hint:SetText("Every jump on any of your characters gives 1 XP; challenges, daily challenges, "
         .. "duels and crowns give more.")
 
+    local function Short(n)
+        if n <= 0 then return GRAY:format("-") end
+        if n < 1000 then return tostring(n) end
+        return ("%.1fk"):format(n / 1000)
+    end
+
     function page:Refresh()
         me = Me()
         standings = BuildStandings("all")
         myPos = MyRank()
-        local nextTitle, nextAt = NextJumpRank(me.total)
-        nextRankText:SetText(nextTitle
-            and ("|cffffd100Next rank:|r %s  |cff999999-  %s jumps to go|r"):format(nextTitle,
-                Fmt(nextAt - me.total))
-            or "|cffffd100Highest rank reached!|r")
-        if CanPrestige() then
-            prestigeButton:Show()
-            prestigeInfo:Hide()
-        else
-            prestigeButton:Hide()
-            prestigeInfo:Show()
-            local pct = math.floor(math.max(0, EntryXP(me) - PrestigeSpent(me)) / PRESTIGE_XP * 100)
-            prestigeInfo:SetText(("|cffffd100Prestige|r at jump level %d  |cff999999-  %d%% there|r"):format(
-                PRESTIGE_LEVEL, math.min(pct, 99)))
+        for _, t in ipairs(tiles) do
+            local value, label = t.get()
+            t.value:SetText(value)
+            if label then t.label:SetText(label) end
         end
-        for _, r in ipairs(left) do r.value:SetText(r.get()) end
-        for _, r in ipairs(right) do r.value:SetText(r.get()) end
+
+        -- Next rank.
+        local s = slots[1]
+        local nextRank, nextAt = NextJumpRank(me.total)
+        s.bar:SetStatusBarColor(1, 0.82, 0)
+        if nextRank then
+            s.left:SetText("Next rank: |cffffd100" .. nextRank .. "|r")
+            s.right:SetText(Fmt(nextAt - me.total) .. " jumps to go")
+            s.bar:SetMinMaxValues(0, nextAt)
+            s.bar:SetValue(me.total)
+            s.bar.text:SetText(("%s / %s"):format(Fmt(me.total), Fmt(nextAt)))
+        else
+            s.left:SetText("|cffffd100Highest rank reached!|r")
+            s.right:SetText("")
+            s.bar:SetMinMaxValues(0, 1)
+            s.bar:SetValue(1)
+            s.bar.text:SetText(Fmt(me.total))
+        end
+        s.tipTitle, s.tipText = "Jump ranks", "Your all-time jumps earn you rank titles."
+
+        -- Prestige: only once you can (jump level 100).
+        local can = CanPrestige()
+        prestigeButton:SetShown(can)
+        if can then
+            s = slots[2]
+            s:Show()
+            s.left:SetText(("|cffffd100Prestige|r - you've reached jump level %d!"):format(PRESTIGE_LEVEL))
+            s.right:SetText("")
+            s.bar:SetStatusBarColor(0.58, 0.0, 0.55)
+            s.bar:SetMinMaxValues(0, 1)
+            s.bar:SetValue(1)
+            s.bar.text:SetText("Ready!")
+            s.tipTitle = "Prestige"
+            s.tipText = "Reset your jump level to 1 and earn a prestige star. "
+                .. "Total jumps, ranks, total XP and challenges are kept."
+        end
+
+        -- The unfinished challenges closest to done fill the other lines.
+        local open = {}
+        for _, c in ipairs(CHALLENGES) do
+            if not acct.done[c.id] then
+                local p = math.min(c.progress(), c.goal)
+                table.insert(open, { c = c, p = p, frac = p / c.goal })
+            end
+        end
+        table.sort(open, function(a, b)
+            if a.frac ~= b.frac then return a.frac > b.frac end
+            return a.c.xp < b.c.xp
+        end)
+        local first = can and 3 or 2
+        for i = first, #slots do
+            s = slots[i]
+            local o = open[i - first + 1]
+            s:SetShown(o ~= nil)
+            if o then
+                s.left:SetText(o.c.name)
+                s.right:SetText("+" .. Fmt(o.c.xp) .. " XP")
+                s.bar:SetStatusBarColor(0.1, 0.6, 0.1)
+                s.bar:SetMinMaxValues(0, o.c.goal)
+                s.bar:SetValue(o.p)
+                s.bar.text:SetText(("%s / %s"):format(Fmt(o.p), Fmt(o.c.goal)))
+                s.tipTitle, s.tipText = o.c.name, o.c.desc
+            end
+        end
+
+        -- Last 7 days (the same day buckets as the average per hour).
+        local today = RateDay()
+        local most = 1
+        for i = 1, RATE_DAYS do
+            local b = acct.rateDays[today - RATE_DAYS + i]
+            days[i].jumps = b and b[1] or 0
+            most = math.max(most, days[i].jumps)
+        end
+        for i, d in ipairs(days) do
+            local isToday = i == RATE_DAYS
+            d.bar:SetHeight(math.max(1, CHART_H * d.jumps / most))
+            if isToday then d.bar:SetColorTexture(1, 0.82, 0, 0.9) else d.bar:SetColorTexture(0.15, 0.62, 0.15, 0.9) end
+            d.value:SetText(Short(d.jumps))
+            d.day:SetText(isToday and "|cffffd100Today|r"
+                or date("%a", (today - RATE_DAYS + i) * 86400 + 43200))
+        end
+
+        for _, list in ipairs({ numbersA, numbersB, records }) do
+            for _, r in ipairs(list) do r.value:SetText(r.get()) end
+        end
     end
 end
 
@@ -3674,10 +4204,11 @@ local function BuildLeaderboardTab(page, width)
     end
 
     function page:Refresh()
-        local mode = JumpCounterDB.ui.boardMode or "all"
+        -- Sorted by this hour (the crown race) until you pick a column yourself.
+        local mode = JumpCounterDB.ui.boardMode or "hour"
         local valid = false
         for _, col in ipairs(BOARD_COLUMNS) do if col.sort == mode then valid = true end end
-        if not valid then mode = "all" end
+        if not valid then mode = "hour" end
         self.mode = mode
         for _, h in ipairs(headers) do
             local on = h.col.sort == mode
@@ -3734,23 +4265,27 @@ end
 ---------------------------------------------------------------------------
 -- Challenges tab: rows like the Achievements window.
 ---------------------------------------------------------------------------
--- An icon for each kind of challenge (the id without its number). All of
--- them are icons the game has had since the start; anything not listed
--- gets the addon's own icon.
-local CHALLENGE_ICONS = {
-    mount = "Ability_Mount_RidingHorse", swim = "Spell_Frost_SummonWaterElemental",
-    ghost = "Spell_Holy_Resurrection", combat = "Ability_Warrior_OffensiveStance",
-    dungeon = "INV_Misc_Head_Dragon_01", party = "INV_Misc_GroupLooking", zones = "INV_Misc_Map_01",
-    capitals = "INV_BannerPVP_02", enemycap = "Ability_Rogue_Disguise", session = "INV_Misc_PocketWatch_01",
-    sprint = "Ability_Rogue_Sprint", nodeath = "Spell_Holy_DivineIntervention", days = "INV_Misc_Book_09",
-    week = "INV_Misc_PocketWatch_02", streak = "Spell_Fire_Fire", resting = "INV_Misc_Rune_01",
-    stealth = "Ability_Stealth", shape = "Ability_Druid_CatForm", pvp = "INV_BannerPVP_01",
-    night = "Spell_Nature_Sleep", lowhp = "Ability_DualWield", maxlevel = "Spell_Holy_SurgeOfLight",
-    classes = "INV_Misc_Book_11", prestige = "Spell_Holy_MagicalSentry", duel = "Ability_Parry",
-    crown = "INV_Crown_01", daily = "INV_Misc_Note_01",
-}
-
 local function BuildChallengesTab(page, width)
+    -- An icon for each kind of challenge (the id without its number). All of
+    -- them are icons the game has had since the start; anything not listed
+    -- gets the addon's own icon.
+    local CHALLENGE_ICONS = {
+        mount = "Ability_Mount_RidingHorse", swim = "Spell_Frost_SummonWaterElemental",
+        ghost = "Spell_Holy_Resurrection", combat = "Ability_Warrior_OffensiveStance",
+        dungeon = "INV_Misc_Head_Dragon_01", party = "INV_Misc_GroupLooking", zones = "INV_Misc_Map_01",
+        capitals = "INV_BannerPVP_02", enemycap = "Ability_Rogue_Disguise", session = "INV_Misc_PocketWatch_01",
+        sprint = "Ability_Rogue_Sprint", nodeath = "Spell_Holy_DivineIntervention", days = "INV_Misc_Book_09",
+        week = "INV_Misc_PocketWatch_02", streak = "Spell_Fire_Fire", resting = "INV_Misc_Rune_01",
+        stealth = "Ability_Stealth", shape = "Ability_Druid_CatForm", pvp = "INV_BannerPVP_01",
+        night = "Spell_Nature_Sleep", lowhp = "Ability_DualWield", maxlevel = "Spell_Holy_SurgeOfLight",
+        classes = "INV_Misc_Book_11", prestige = "Spell_Holy_MagicalSentry", duel = "Ability_Parry",
+        crown = "INV_Crown_01", daily = "INV_Misc_Note_01",
+        -- 1.8.7
+        hour = "INV_Misc_PocketWatch_03", air = "Spell_Magic_FeatherFall", clock = "Spell_Nature_TimeStop",
+        indoor = "INV_Misc_Key_03", tour = "INV_Misc_Bone_HumanSkull_01", perfect = "Spell_Holy_PrayerOfHealing",
+        winrow = "Ability_Warrior_BattleShout", burst = "Ability_Hunter_RunningShot",
+        pass = "Ability_Mount_JungleTiger", crowd = "INV_Misc_GroupNeedMore", level = "INV_Boots_05",
+    }
     local ROW_H = 48
     local DAILY_TOP, DAILY_ROW = -22, 28
     local BAR_W = 190

@@ -41,8 +41,9 @@ OPEN IT
                  hover a player for all their details. Your own row is
                  always shown at the bottom, and the bottom line tells you
                  how far it is to the player above you.
-    Challenges   today's three daily challenges, then every challenge,
-                 closest to done first.
+    Challenges   this week's goal for everyone together, today's three
+                 daily challenges, then every challenge, closest to done
+                 first.
     Settings     which chat messages you get, and the small on-screen
                  counter (your total, level, XP bar and leaderboard place).
 
@@ -66,6 +67,7 @@ CHAT MESSAGES (change them in the Settings tab)
     - your level-ups, completed challenges and new ranks
     - friends' new ranks and prestiges
     - friends' character levels: at 10 and 20, then every level from 30
+    - a weekly goal reached together
     - when you pass someone on the leaderboard, or they pass you
 
 JUMP LEVELS, CHALLENGES & PRESTIGE
@@ -87,7 +89,15 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
 
   DAILY CHALLENGES: three new ones every day - easy, medium and hard - for
   extra XP. Everyone gets the same three, so you can race your friends.
-  They're at the top of the Challenges tab and reset with the daily reset.
+  They're near the top of the Challenges tab and reset with the daily reset.
+
+  WEEKLY GOAL (v1.8.10): everyone on your leaderboard works on it together.
+  This week's jumps of all of you are added up against three goals - bronze,
+  silver and gold - and each one reached gives XP to everybody who has done
+  at least 500 jumps that week. The goals are sized by how many of you are
+  active that week (100 jumps or more), so players who rarely jump don't
+  make them harder. Resets with the weekly reset; the week you first get it,
+  only jumps from then on count.
 
 JUMP DUELS
   Now and then two players who are jumping around get paired for a
@@ -98,7 +108,8 @@ JUMP DUELS
   players once per 30 minutes (also with /jumps duel). Turn them off (or
   the results of others' duels) in Settings. No duels while swimming.
   Hopping on the spot against a tree or a wall counts no faster than
-  normal jumping (v1.8.7).
+  normal jumping (v1.8.7). Presses that don't lift you off the ground -
+  lying dead, netted, stunned, sitting - aren't counted (v1.8.10).
   Both players need v1.7.0 or newer.
 
   DUEL RANKS: duels are rated, like chess. Win and you take duel points

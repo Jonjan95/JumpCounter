@@ -12,7 +12,7 @@ local BROADCAST_INTERVAL = 30     -- seconds between automatic score broadcasts
 -- while real jumps up a hill still count.
 local JUMP_MIN_INTERVAL = 0.5
 local SWIM_JUMP_COOLDOWN = 0.6    -- min seconds between counted jumps in water
-local PEER_EXPIRY_DAYS = 60       -- drop players not heard from in this long
+local PEER_EXPIRY_DAYS = 14       -- drop players not heard from in this long (60 before 1.8.10)
 local BOARD_ROWS = 15             -- visible rows; the list scrolls
 
 local playerKey                   -- "Name-Realm" of the current character
@@ -79,8 +79,10 @@ end
 
 ---------------------------------------------------------------------------
 -- Update notice: when someone with a newer version is seen, one short chat
--- line (once per session). The newest version seen is saved, so it also
--- shows right after logging in. /jumps update opens the window with the link.
+-- line - once per session for each version (1.8.10: so a second release on
+-- the same day is announced too, not only the first). The newest version
+-- seen is saved, so it also shows right after logging in. /jumps update
+-- opens the window with the link.
 ---------------------------------------------------------------------------
 -- Unlisted project: only reachable through this link.
 local CURSEFORGE_URL = "https://www.curseforge.com/wow/addons/jumpingcounter"
@@ -94,8 +96,8 @@ end
 
 local function ShowUpdateNotice()
     local v = NewestVersion()
-    if not v or updateShown then return end
-    updateShown = true
+    if not v or updateShown == v then return end
+    updateShown = v                   -- the version we've told you about
     Print(("|cffffd100v%s is out|r (you have v%s) - update in the CurseForge app. "
         .. "|cff999999/jumps update for the link.|r"):format(v, VERSION))
 end
@@ -587,6 +589,58 @@ local CHALLENGES = {
       desc = "Reach jump level 50.",                          progress = function() return Stat("bestLevel") end },
     { id = "level2",   name = "Top of the Ladder", xp = 1500, goal = 100,
       desc = "Reach jump level 100.",                         progress = function() return Stat("bestLevel") end },
+
+    -- 1.8.10: up to 100 challenges - harder tiers of the ones above, and the weekly goal.
+    { id = "hour3",    name = "Sixty Minute Storm", xp = 1500, goal = 3500,
+      desc = "Jump 3,500 times in one hour.",                 progress = function() return Stat("bestHour") end },
+    { id = "air3",     name = "Skydiver",          xp = 1000, goal = 8,
+      desc = "Stay in the air for 8 seconds after a jump - and survive.",
+      progress = function() return math.floor(Stat("bestAir")) end },
+    { id = "indoor3",  name = "Never Leaves the House", xp = 1500, goal = 25000,
+      desc = "Jump 25,000 times indoors.",                    progress = function() return Stat("indoors") end },
+    { id = "tour3",    name = "Dungeon Master",    xp = 1500, goal = 30,
+      desc = "Jump in 30 different dungeons or raids.",       progress = function() return CountKeys(acct.stats.instances) end },
+    { id = "perfect3", name = "Perfect Month",     xp = 2000, goal = 30,
+      desc = "Complete all three daily challenges on 30 different days.",
+      progress = function() return Stat("perfectDays") end },
+    { id = "winrow3",  name = "Untouchable Streak", xp = 2000, goal = 10,
+      desc = "Win 10 jump duels in a row.",                   progress = function() return Stat("bestWinStreak") end },
+    { id = "pass3",    name = "Left Lane Only",    xp = 2000, goal = 250,
+      desc = "Pass other players on the leaderboard 250 times.", progress = function() return Stat("overtakes") end },
+    { id = "zones4",   name = "Cartographer",      xp = 1500, goal = 75,
+      desc = "Jump in 75 different zones.",                   progress = function() return CountKeys(acct.stats.zones) end },
+    { id = "ghost3",   name = "Poltergeist",       xp = 1000, goal = 1000,
+      desc = "Jump 1,000 times as a ghost.",                  progress = function() return Stat("ghost") end },
+    { id = "party3",   name = "Bouncing Band",     xp = 1500, goal = 5000,
+      desc = "Jump 5,000 times in a full group of 5 or more.", progress = function() return Stat("group") end },
+    { id = "dungeon3", name = "Boss Room Bunny",   xp = 2000, goal = 25000,
+      desc = "Jump 25,000 times inside dungeons or raids.",   progress = function() return Stat("instance") end },
+    { id = "stealth2", name = "Shadow Hopper",     xp = 750,  goal = 1000,
+      desc = "Jump 1,000 times while stealthed.",             progress = function() return Stat("stealth") end },
+    { id = "shape2",   name = "Wild at Heart",     xp = 1000, goal = 5000,
+      desc = "Jump 5,000 times in a druid form or Ghost Wolf.", progress = function() return Stat("shapeshift") end },
+    { id = "pvp2",     name = "Flag Room Frolic",  xp = 1250, goal = 2500,
+      desc = "Jump 2,500 times in a battleground.",           progress = function() return Stat("pvp") end },
+    { id = "night2",   name = "Insomniac",         xp = 1000, goal = 5000,
+      desc = "Jump 5,000 times between midnight and 4 AM.",   progress = function() return Stat("night") end },
+    { id = "lowhp2",   name = "Marked for Mischief", xp = 1250, goal = 5000,
+      desc = "Jump 5,000 times while flagged for PvP.",       progress = function() return Stat("pvpFlagged") end },
+    { id = "maxlevel2", name = "Veteran Hopper",   xp = 1500, goal = 25000,
+      desc = "Jump 25,000 times at max character level.",     progress = function() return Stat("maxLevel") end },
+    { id = "sprint3",  name = "Lightning Legs",    xp = 1000, goal = 75,
+      desc = "Jump 75 times within 60 seconds.",              progress = function() return Stat("bestMinute") end },
+    { id = "daily3",   name = "A Year of Days",    xp = 2500, goal = 365,
+      desc = "Complete 365 daily challenges.",                progress = function() return acct.dailyDone or 0 end },
+    { id = "duelplay1", name = "Seasoned Duelist", xp = 1000, goal = 100,
+      desc = "Take part in 100 jump duels.",
+      progress = function() return (acct.duelWins or 0) + (acct.duelLosses or 0) + (acct.duelDraws or 0) end },
+    { id = "week3",    name = "Weekly Titan",      xp = 2000, goal = 50000,
+      desc = "Jump 50,000 times in one week.",                progress = function() return Stat("bestWeek") end },
+    { id = "team1",    name = "Team Player",       xp = 500,  goal = 1,
+      desc = "Reach a weekly goal together with your leaderboard.",
+      progress = function() return Stat("weeklyTiers") end },
+    { id = "team2",    name = "Golden Month",      xp = 2000, goal = 4,
+      desc = "Reach the gold weekly goal together 4 times.",  progress = function() return Stat("weeklyGold") end },
 }
 
 local function CountCompleted(data)
@@ -665,10 +719,13 @@ local function InitDB()
         db.settingsVersion = 3
     end
 
-    -- Forget players we haven't heard from in PEER_EXPIRY_DAYS (left the guild, quit...).
-    local cutoff = time() - PEER_EXPIRY_DAYS * 86400
+    -- Forget players we haven't heard from in PEER_EXPIRY_DAYS (left the guild,
+    -- quit, turned the addon off...). Rows from versions before 1.1.0 (no
+    -- account id: nobody active is still on those) go after 3 days. Anyone
+    -- who comes back is simply added again by their next score.
+    local cutoff, oldCutoff = time() - PEER_EXPIRY_DAYS * 86400, time() - 3 * 86400
     for key, data in pairs(db.peers) do
-        if (data.seen or 0) < cutoff then db.peers[key] = nil end
+        if (data.seen or 0) < (data.acct and cutoff or oldCutoff) then db.peers[key] = nil end
     end
 
     local name = UnitName("player")
@@ -807,7 +864,8 @@ local CROWN_ICON = "|TInterface\\GroupFrame\\UI-Group-LeaderIcon:14:14|t "
 local function Me()
     local wid = CurrentWeekId()
     local me = { total = 0, week = 0, weekId = wid, deaths = 0, rate = { jumps = 0, seconds = 0 },
-        challengeXP = acct.challengeXP + (acct.duelXP or 0) + (acct.crownXP or 0) + (acct.dailyXP or 0),
+        challengeXP = acct.challengeXP + (acct.duelXP or 0) + (acct.crownXP or 0) + (acct.dailyXP or 0)
+            + (acct.weeklyXP or 0),
         prestige = acct.prestige, prestigeSpent = acct.prestigeSpent, done = acct.done,
         duelWins = acct.duelWins or 0, duelPoints = acct.duelPoints or 0, faction = MyFaction(),
         duelBest = acct.stats and acct.stats.bestDuel or 0,
@@ -1123,6 +1181,10 @@ local function PruneStalePeers()
             if name:find("%s") then
                 -- Same full name: keep only the most recently updated row.
                 local full = name:lower()
+                -- (A first name alone is never enough here: two players can
+                -- share one. A leftover row for someone's alt - "Small Nose",
+                -- listed by its account as just "Small" - goes with the
+                -- 3-day rule for old versions instead.)
                 stale = covered[full] or (fullSeen[full] or 0) > (data.seen or 0)
             else
                 local f = FirstWord(name)
@@ -2249,6 +2311,99 @@ do
         Check()
     end
 
+    -- Weekly goal (1.8.10): everyone on your leaderboard works on it together.
+    -- This week's jumps of all of you are added up (they're shared already),
+    -- against three goals that grow with the number of ACTIVE players - those
+    -- with WEEKLY_ACTIVE jumps or more that week - so people who rarely jump
+    -- don't make it harder. The first WEEKLY_FULL active players count in
+    -- full, each one beyond that for half; and the goals are never sized for
+    -- fewer than WEEKLY_FLOOR players (or your whole leaderboard, if that's
+    -- smaller), so one keen player can't finish them alone on Monday. Each
+    -- goal reached gives XP to everyone who has done their bit that week
+    -- (WEEKLY_MIN jumps). Every player sees their own leaderboard's total, so
+    -- the goal is per circle of friends.
+    local WEEKLY = {
+        { label = "Bronze", per = 2500,  xp = 250,  color = "|cffe0915a" },
+        { label = "Silver", per = 6000,  xp = 500,  color = "|cffd0d8e6" },
+        { label = "Gold",   per = 12000, xp = 1000, color = "|cffffd100" },
+    }
+    local WEEKLY_MIN = 500
+    local WEEKLY_ACTIVE, WEEKLY_FULL, WEEKLY_FLOOR = 100, 10, 3
+
+    function Daily.Weekly()
+        local wid = CurrentWeekId()
+        local w = acct.weekly
+        -- (A test build of 1.8.10 counted the whole week from the start and
+        -- paid out at once: take that back. Nobody else has such data.)
+        if w and not w.v then
+            acct.weeklyXP, acct.stats.weeklyTiers, acct.stats.weeklyGold = nil, nil, nil
+            if acct.done.team1 then
+                acct.done.team1 = nil
+                acct.challengeXP = math.max(0, acct.challengeXP - 500)
+            end
+            w = nil
+        end
+        if not w or w.id ~= wid then
+            w = { id = wid, claimed = {}, v = 2 }
+            -- The very first week starts when you get the weekly goal (in the
+            -- middle of a week): only jumps from then on count. base = what
+            -- everyone had done that week already.
+            if not acct.weeklySince then
+                acct.weeklySince = wid
+                w.base, w.baseMine = {}, MyWeekCount()
+            end
+            acct.weekly = w
+        end
+        local base = w.base
+        local mine = math.max(0, MyWeekCount() - (w.baseMine or 0))
+        local total, members = mine, 1
+        local active = mine >= WEEKLY_ACTIVE and 1 or 0
+        for key, data in pairs(JumpCounterDB.peers) do
+            if not JumpCounterDB.chars[key] then
+                members = members + 1
+                if wid and data.weekId == wid then
+                    local week = data.week or 0
+                    if base then
+                        -- (someone first seen later that week: from then on)
+                        base[key] = base[key] or week
+                        week = math.max(0, week - base[key])
+                    end
+                    total = total + week
+                    if week >= WEEKLY_ACTIVE then active = active + 1 end
+                end
+            end
+        end
+        -- How many players the goals are sized for.
+        local size = math.max(active, math.min(WEEKLY_FLOOR, members))
+        size = math.min(size, WEEKLY_FULL) + math.max(0, size - WEEKLY_FULL) * 0.5
+        local tiers = {}
+        for i, t in ipairs(WEEKLY) do
+            tiers[i] = { label = t.label, color = t.color, xp = t.xp, goal = math.floor(t.per * size + 0.5),
+                done = w.claimed[i] and true or false }
+        end
+        return { total = total, members = members, active = active, mine = mine, min = WEEKLY_MIN,
+            tiers = tiers, state = w, partial = base ~= nil }
+    end
+
+    -- Hands out the goals reached (after your jumps and at login).
+    function Daily.CheckWeekly()
+        local info = Daily.Weekly()
+        if info.mine < WEEKLY_MIN then return end
+        for i, t in ipairs(info.tiers) do
+            if not t.done and info.total >= t.goal then
+                info.state.claimed[i] = true
+                acct.weeklyXP = (acct.weeklyXP or 0) + t.xp
+                acct.stats.weeklyTiers = (acct.stats.weeklyTiers or 0) + 1
+                if i == #info.tiers then acct.stats.weeklyGold = (acct.stats.weeklyGold or 0) + 1 end
+                dirty = true
+                if settings.myProgress then
+                    Notify(GOLD:format(("Weekly goal reached together (%s): %s jumps this week! (+%d XP)")
+                        :format(t.label, BreakUpLargeNumbers(t.goal), t.xp)), true)
+                end
+            end
+        end
+    end
+
     function Daily.OnDeath()
         State().run = 0
     end
@@ -2355,6 +2510,7 @@ local function TrackJump(inWater)
     st.bestSinceDeath = math.max(st.bestSinceDeath or 0, st.sinceDeath)
     flags.sinceDeath = nil
     Daily.OnJump(flags, mapID, #minuteJumps)
+    Daily.CheckWeekly()
 
     CheckChallenges()
 end
@@ -3030,6 +3186,22 @@ local airPress = {
     touchAt = nil,     -- when we came down onto the water from the air
     rehop = 0.15,      -- a hop out of the water must follow the touch this quickly
     full = 0.82,       -- seconds a normal jump on flat ground takes
+    -- 1.8.10: presses that don't lift you off the ground (netted, stunned,
+    -- sitting...). The game reports the key press anyway. Once a counted
+    -- press turns out to be one of those ("dud"), the next presses are only
+    -- counted when we see you in the air (landPress = waiting for that).
+    dudAfter = 0.25,   -- still on the ground this long after a press: it did nothing
+    dud = false,
+    landPress = nil,
+    seesAir = false,   -- we've seen a counted jump in the air (the game reports it)
+    -- 1.8.10: a jump pressed on the very frame you land. The game jumps
+    -- again at once, but we never see you on the ground in between: the
+    -- press looks like one made in mid-air, and the jump was skipped (3 of
+    -- 51 in a recorded trace of normal jumping). Such a press is remembered
+    -- (rejumpAt) when it comes right when a normal jump lands (rejumpFrom ..
+    -- rejumpTo seconds after take-off), and counted when you do land, if
+    -- what followed was another jump's worth of air (rejumpAir .. rejumpTo).
+    rejumpAt = nil, rejumpFrom = 0.74, rejumpTo = 0.90, rejumpAir = 0.40,
 }
 local groundTracker = CreateFrame("Frame")
 groundTracker:SetScript("OnUpdate", function()
@@ -3045,20 +3217,56 @@ groundTracker:SetScript("OnUpdate", function()
     local wet = wasSwimming or Plain(IsSubmerged and IsSubmerged())
     -- 1.8.7: how long a jump on land kept you in the air (jump off something
     -- high). Landing dead doesn't count; flying or a flight path cancels it.
-    if airPress.jumpAt and falling then airPress.flew = true end
+    if airPress.jumpAt and falling then airPress.flew, airPress.seesAir = true, true end
     if airPress.jumpAt and (grounded or wet) then
         local air = now - airPress.jumpAt
-        airPress.jumpAt = nil
-        -- Only a time we really saw: in the air on at least one frame.
-        airPress.lastAir = airPress.flew and air or nil
-        if acct and air > (acct.stats.bestAir or 0) and air < 120
-            and not (UnitIsDeadOrGhost and Plain(UnitIsDeadOrGhost("player"))) then
-            acct.stats.bestAir = air
-            if air >= 2 then CheckChallenges() end
+        if airPress.flew or wet then
+            -- Two jumps in one: a press right when the first one landed,
+            -- then another jump's worth of air (see rejumpAt).
+            local again = airPress.rejumpAt
+            airPress.rejumpAt = nil
+            if again and airPress.flew and not wet and now - again >= airPress.rejumpAir
+                and now - again <= airPress.rejumpTo then
+                if debugMode then
+                    Print(("debug: two jumps without touching down (%.2f s + %.2f s) - second one counted")
+                        :format(again - airPress.jumpAt, now - again))
+                end
+                airPress.Count(false, again)
+                air = now - again
+                airPress.flew = true
+            end
+            airPress.jumpAt = nil
+            -- Only a time we really saw: in the air on at least one frame.
+            airPress.lastAir = airPress.flew and air or nil
+            if acct and airPress.flew and air > (acct.stats.bestAir or 0) and air < 120
+                and not (UnitIsDeadOrGhost and Plain(UnitIsDeadOrGhost("player"))) then
+                acct.stats.bestAir = air
+                if air >= 2 then CheckChallenges() end
+            end
+        elseif air > airPress.dudAfter then
+            -- Counted at the press, but you never left the ground: the press
+            -- did nothing (netted, stunned, sitting...). From now on presses
+            -- have to be seen in the air to count, until one is.
+            airPress.jumpAt, airPress.lastAir = nil, nil
+            if airPress.seesAir and not airPress.dud then
+                airPress.dud = true
+                if debugMode then Print("debug: that press didn't lift you off the ground") end
+            end
+        end
+    end
+    -- A press waiting to be seen in the air (after a dud).
+    if airPress.landPress then
+        if falling and not wet then
+            airPress.landPress, airPress.dud = nil, false
+            airPress.Count(false, now)
+            if airPress.jumpAt then airPress.flew = true end
+        elseif now - airPress.landPress > airPress.dudAfter then
+            if debugMode then Print("debug: pressed but stayed on the ground - not counted") end
+            airPress.landPress = nil
         end
     end
     if Plain(IsFlying()) or Plain(UnitOnTaxi("player")) then
-        airPress.jumpAt, airPress.lastAir = nil, nil
+        airPress.jumpAt, airPress.lastAir, airPress.landPress, airPress.rejumpAt = nil, nil, nil, nil
         airPress.inAir, airPress.touchAt, airPress.pressAt = false, nil, nil
     elseif falling and not wet then
         -- Out of the water and in the air: a surface hop, if it follows a
@@ -3091,6 +3299,14 @@ local function OnJump()
             GetTime() - lastJumpTime))
     end
     if Plain(UnitOnTaxi("player")) or Plain(IsFlying()) then return end
+    -- 1.8.10: dead and not released, you lie on the ground and the jump key
+    -- does nothing - but the game still reports the press, and every press
+    -- used to count (2 a second, also in a duel). As a ghost you really
+    -- jump, and those count as before.
+    if UnitIsDead and Plain(UnitIsDead("player")) and not Plain(UnitIsGhost("player")) then
+        if debugMode then Print("debug: dead and not released - not counted") end
+        return
+    end
     local now = GetTime()
     if wasSwimming or Plain(IsSwimming()) then
         -- In the water: counted once we see you leave it (see above).
@@ -3098,9 +3314,23 @@ local function OnJump()
         return
     end
     -- On land: only count jumps that start from the ground (no mid-air spam).
-    if not wasGrounded then return end
+    if not wasGrounded then
+        -- ...except one pressed on the very frame you land: remembered, and
+        -- counted on landing if it turns out to have been a jump (see rejumpAt).
+        local took = airPress.jumpAt
+        if took and airPress.flew and now - took >= airPress.rejumpFrom and now - took <= airPress.rejumpTo then
+            airPress.rejumpAt = now
+        end
+        return
+    end
     wasGrounded = false
     if debugMode then jumpStartedAt = now end
+    -- After a press that did nothing: count this one only once we see you
+    -- in the air (the tracker above does that).
+    if airPress.dud then
+        airPress.landPress = now
+        return
+    end
     airPress.Count(false, now)
 end
 
@@ -3126,6 +3356,7 @@ function airPress.Count(inWater, now)
     lastJumpTime = now
     -- Timed until you land (1.8.7), for the rule above and the air time record.
     airPress.jumpAt, airPress.flew, airPress.lastAir = (not inWater) and now or nil, false, nil
+    airPress.rejumpAt = nil
 
     charData.total = charData.total + 1
     sessionJumps = sessionJumps + 1
@@ -4077,9 +4308,11 @@ local function BuildChallengesTab(page, width)
         indoor = "INV_Misc_Key_03", tour = "INV_Misc_Bone_HumanSkull_01", perfect = "Spell_Holy_PrayerOfHealing",
         winrow = "Ability_Warrior_BattleShout", burst = "Ability_Hunter_RunningShot",
         pass = "Ability_Mount_JungleTiger", crowd = "INV_Misc_GroupNeedMore", level = "INV_Boots_05",
+        duelplay = "INV_Sword_27", team = "Spell_Holy_PrayerOfFortitude",        -- 1.8.10
     }
     local ROW_H = 48
-    local DAILY_TOP, DAILY_ROW = -22, 28
+    local WEEK_H = 58                     -- the weekly goal's block at the top (1.8.10)
+    local DAILY_TOP, DAILY_ROW = -22 - WEEK_H, 28
     local BAR_W = 190
 
     -- A progress bar with a dark frame, like the bars in the Achievements window.
@@ -4095,11 +4328,26 @@ local function BuildChallengesTab(page, width)
 
     -- Today's three daily challenges: a stripe in the tier's colour, the
     -- task, a bar and the reward.
+    -- This week's goal, for everyone on your leaderboard together: one bar
+    -- towards the next goal, and the three goals with their rewards.
+    local weekTitle = SectionTitle(page, "This week - together")
+    weekTitle:SetPoint("TOPLEFT", 4, -2)
+    weekTitle.line:SetWidth(width - 8)
+    local weekLeft = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    weekLeft:SetPoint("TOPRIGHT", -6, -4)
+    local weekBar = Bar(page, width - 8 - 2, 15)
+    weekBar:SetPoint("TOPLEFT", 5, -23)
+    weekBar:SetStatusBarColor(1, 0.82, 0)
+    local weekInfo = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    weekInfo:SetPoint("TOPLEFT", 5, -42)
+    local weekMine = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    weekMine:SetPoint("TOPRIGHT", -6, -42)
+
     local todayTitle = SectionTitle(page, "Today's challenges")
-    todayTitle:SetPoint("TOPLEFT", 4, -2)
+    todayTitle:SetPoint("TOPLEFT", 4, -2 - WEEK_H)
     todayTitle.line:SetWidth(width - 8)
     local resets = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    resets:SetPoint("TOPRIGHT", -6, -4)
+    resets:SetPoint("TOPRIGHT", -6, -4 - WEEK_H)
     local daily = {}
     for i = 1, 3 do
         local r = CreateFrame("Frame", nil, page)
@@ -4213,6 +4461,30 @@ local function BuildChallengesTab(page, width)
         doneBar:SetValue(completed)
         doneBar.text:SetText(("%d / %d"):format(completed, #CHALLENGES))
         summary:SetText(("complete  |cff999999-|r  |cffffd100+%s XP|r earned"):format(Fmt(acct.challengeXP)))
+
+        -- The weekly goal.
+        local week = Daily.Weekly()
+        local secs = SecondsUntilReset()
+        weekLeft:SetText((week.partial and "Counting from when you got the weekly goal  -  " or "")
+            .. (secs and ("new week in " .. FormatDuration(secs)) or ""))
+        local nextTier
+        local parts = {}
+        for _, t in ipairs(week.tiers) do
+            if not nextTier and week.total < t.goal then nextTier = t end
+            local mark = t.done and " |TInterface\\RaidFrame\\ReadyCheck-Ready:0|t" or ""
+            table.insert(parts, ("%s%s|r %s%s  |cff999999+%s XP|r"):format(t.color, t.label, Fmt(t.goal), mark, Fmt(t.xp)))
+        end
+        local target = nextTier or week.tiers[#week.tiers]
+        weekBar:SetMinMaxValues(0, target.goal)
+        weekBar:SetValue(math.min(week.total, target.goal))
+        weekBar.text:SetText(nextTier
+            and ("%s / %s jumps - %s"):format(Fmt(week.total), Fmt(target.goal), target.label)
+            or ("%s jumps - all three goals reached!"):format(Fmt(week.total)))
+        weekInfo:SetText(table.concat(parts, "     "))
+        weekMine:SetText(week.mine >= week.min
+            and ("Your part: |cffffd100%s|r  |cff999999(%d active %s)|r"):format(Fmt(week.mine), week.active,
+                week.active == 1 and "player" or "players")
+            or ("Your part: |cffff5555%s|r / %s to share the rewards"):format(Fmt(week.mine), Fmt(week.min)))
 
         resets:SetText("New challenges in " .. FormatDuration(Daily.SecondsLeft()))
         for i, d in ipairs(Daily.List()) do
@@ -4896,6 +5168,7 @@ events:SetScript("OnEvent", function(_, event, ...)
         -- Stats combined from several characters (or new challenges) may
         -- already be finished.
         UpdateDerivedStats()
+        Daily.CheckWeekly()               -- a weekly goal the others reached while we were away
         CheckChallenges()
         JumpCounterDB.jumpTrace = nil      -- left over from a 1.8.5 test build
         hooksecurefunc("JumpOrAscendStart", OnJump)

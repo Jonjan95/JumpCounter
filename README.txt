@@ -34,7 +34,8 @@ OPEN IT
                  and all your numbers. ("This session" carries on after a
                  /reload or a restart, if you're back within 10 minutes.)
     Leaderboard  everyone you can see: level, title, total jumps, this hour,
-                 this week, average per hour, deaths, duel rank and wins. It
+                 average per hour, deaths, duel rank, duel wins and best
+                 score in a duel. It
                  opens sorted by this hour; click a column header to sort
                  by another (your choice is remembered), and
                  hover a player for all their details. Your own row is
@@ -77,7 +78,7 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
   also for challenges already done; everyone's stars were recalculated from
   their total XP, so the same XP always means the same stars.)
   Your star changes look as you collect more of them. (The addon's own
-  images - stars and medals in v1.8.6, the duel figures in v1.8.7 - are
+  images - the stars and medals, new in v1.8.6 - are
   only found when the game starts: restart it once after updating to see
   them.)
 
@@ -90,9 +91,8 @@ JUMP LEVELS, CHALLENGES & PRESTIGE
 
 JUMP DUELS
   Now and then two players who are jumping around get paired for a
-  30-second jump duel: a window shows the two of you - portrait, name and
-  score on each side, and a little figure for each that hops when that
-  player jumps - and whoever jumps most wins bonus XP. Everyone online with the addon
+  30-second jump duel: a small window counts down and shows both scores,
+  and whoever jumps most wins bonus XP. Everyone online with the addon
   sees the result in chat. The more of you are jumping, the more often
   duels happen: at most one every 10 minutes for you, and the same two
   players once per 30 minutes (also with /jumps duel). Turn them off (or

@@ -810,6 +810,7 @@ local function Me()
         challengeXP = acct.challengeXP + (acct.duelXP or 0) + (acct.crownXP or 0) + (acct.dailyXP or 0),
         prestige = acct.prestige, prestigeSpent = acct.prestigeSpent, done = acct.done,
         duelWins = acct.duelWins or 0, duelPoints = acct.duelPoints or 0, faction = MyFaction(),
+        duelBest = acct.stats and acct.stats.bestDuel or 0,
         hourId = acct.hourId, hour = acct.hour, crowns = acct.crowns or 0,
         class = charData.class, display = charData.display }
     for _, c in pairs(JumpCounterDB.chars) do
@@ -1048,6 +1049,7 @@ function ScoreMessage()
         .. ":" .. CurrentHourId() .. ":" .. HourCount(me) .. ":" .. (acct.crowns or 0)
         .. ":" .. (acct.prestigeSpent or 0)                     -- 1.8.2: XP used by prestige stars
         .. ":" .. (acct.duelPoints or 0)                        -- 1.8.2: duel rank points
+        .. ":" .. (acct.stats.bestDuel or 0)                    -- 1.8.9: most jumps in one duel
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -1217,7 +1219,8 @@ do
             -- 1.7.3: after the hop count, so older versions ignore them
             n(data.duelLosses), n(data.duelDraws),
             n(data.hourId), n(data.hour), n(data.crowns),          -- 1.8.0
-            n(data.prestigeSpent), n(data.duelPoints) }, ":")       -- 1.8.2
+            n(data.prestigeSpent), n(data.duelPoints),              -- 1.8.2
+            n(data.duelBest) }, ":")                                -- 1.8.9
     end
 
     -- Up to RELAY_BATCH passable scores (newest first) that pass filter(data).
@@ -1294,7 +1297,7 @@ do
     function ApplyRelay(msg, via)
         local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
             rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws,
-            rHourId, rHour, rCrowns, rSpent, rPoints = strsplit(":", msg)
+            rHourId, rHour, rCrowns, rSpent, rPoints, rBest = strsplit(":", msg)
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
@@ -1337,6 +1340,7 @@ do
         entry.duelLosses, entry.duelDraws = num(rLosses), num(rDraws)   -- nil before 1.7.3
         entry.hourId, entry.hour, entry.crowns = num(rHourId), num(rHour), num(rCrowns)   -- 1.8.0
         entry.prestigeSpent, entry.duelPoints = num(rSpent), num(rPoints)               -- 1.8.2
+        entry.duelBest = num(rBest)                                                     -- 1.8.9
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
         entry.hops = tonumber(rHops) or RELAY_MAX_HOPS
@@ -1401,7 +1405,7 @@ local function HandleMessage(msg, key, display, reply, via)
     end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
         charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction,
-        duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent, duelPoints = strsplit(":", msg)
+        duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent, duelPoints, duelBest = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -1482,6 +1486,7 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.crowns = tonumber(crowns)
         entry.prestigeSpent = tonumber(prestigeSpent)   -- these two are nil before 1.8.2
         entry.duelPoints = tonumber(duelPoints)
+        entry.duelBest = tonumber(duelBest)       -- nil before 1.8.9
         entry.via, entry.hops = via, 0            -- heard directly
         entry.directSeen = time()
         entry.version = (version and version ~= "") and version or nil
@@ -2507,94 +2512,16 @@ do
         return list
     end
 
-    -- The duel window (1.8.7): you on the left, your opponent on the right -
-    -- a portrait, name and score each - "VS" and the clock between them, and
-    -- a bar underneath showing who is ahead.
-    -- A face for one side: the character's own portrait when the game can
-    -- see them (you always; the opponent when targeted or in your group and
-    -- nearby), otherwise the round icon of their class.
-    -- who: whose face it is. Once we have someone's real portrait it stays
-    -- for the rest of the duel, also when they go out of sight again.
-    local function SetFace(side, class, unit, who)
-        local tex = side.icon
-        if unit and SetPortraitTexture then
-            tex:SetTexCoord(0, 1, 0, 1)
-            if pcall(SetPortraitTexture, tex, unit) then
-                side.faceOf, side.faceKey = who, nil
-                return
-            end
-        end
-        if who and side.faceOf == who then return end      -- keep their portrait
-        side.faceOf = nil
-        local key = class or "?"
-        if side.faceKey == key then return end
-        side.faceKey = key
-        local c = class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
-        if c then
-            tex:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
-            tex:SetTexCoord(c[1], c[2], c[3], c[4])
-        else
-            tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-        end
-    end
-
-    -- A unit we can see that is the opponent: same first name and class.
-    local function OpponentUnit(opp)
-        local first = opp.name and opp.name:match("^(%S+)")
-        if not first then return end
-        local function is(unit)
-            if not UnitExists(unit) then return false end
-            local name = Plain(UnitName(unit))
-            if name ~= first then return false end
-            local _, class = UnitClass(unit)
-            if opp.class and Plain(class) ~= opp.class then return false end
-            return not UnitIsVisible or Plain(UnitIsVisible(unit)) and true or false
-        end
-        -- Your target, focus or the player under the mouse; someone in your
-        -- group; or anyone close enough to have a nameplate.
-        if is("target") then return "target" end
-        if is("focus") then return "focus" end
-        if is("mouseover") then return "mouseover" end
-        if IsInRaid() then
-            for i = 1, 40 do if is("raid" .. i) then return "raid" .. i end end
-        elseif IsInGroup() then
-            for i = 1, 4 do if is("party" .. i) then return "party" .. i end end
-        end
-        for i = 1, 40 do if is("nameplate" .. i) then return "nameplate" .. i end end
-    end
-
-    -- Fills the window. timeText: the line in the middle (clock or result).
-    local function FillDuelFrame(d, timeText, colours)
+    -- The duel window: small, as it always was - who you're up against, the
+    -- score, and the clock - in the same look as the on-screen counter (1.8.9).
+    -- timeText: the line under the score (clock or result).
+    local function FillDuelFrame(d, timeText)
         local f = duelFrame
         local mine, theirs = d.mine or 0, d.theirs or 0
-        f.me.name:SetText(ClassColored(DisplayName(playerKey), charData.class))
-        f.them.name:SetText(ClassColored(d.opp.name, d.opp.class))
-        local ahead, behind, level = "|cff33ff33%d|r", "|cffff5555%d|r", "|cffffffff%d|r"
-        f.me.score:SetText(((mine > theirs and ahead) or (mine < theirs and behind) or level):format(mine))
-        f.them.score:SetText(((theirs > mine and ahead) or (theirs < mine and behind) or level):format(theirs))
+        f.title:SetText("Jump duel vs " .. ClassColored(d.opp.name, d.opp.class))
+        local lead = mine > theirs and "|cff33ff33%d|r" or (mine < theirs and "|cffff5555%d|r" or "|cffffffff%d|r")
+        f.score:SetText(("You " .. lead .. "  -  %d"):format(mine, theirs))
         f.time:SetText(timeText)
-        -- The bar: your share of all the jumps so far (half each at 0 - 0).
-        f.bar:SetMinMaxValues(0, 1)
-        f.bar:SetValue((mine + theirs) > 0 and mine / (mine + theirs) or 0.5)
-        if f.Score then
-            f.Score(f.me, mine, charData.class)
-            f.Score(f.them, theirs, d.opp.class)
-        end
-        -- Portraits: yours is drawn once. The opponent is looked for at most
-        -- once a second, and not at all once their face has been found.
-        if f.me.faceOf ~= "me" then SetFace(f.me, charData.class, "player", "me") end
-        local who = d.opp.acct or d.opp.name
-        if f.them.faceOf ~= who then
-            local unit
-            local t = GetTime()
-            if t - (f.lookedAt or 0) >= 1 then
-                f.lookedAt = t
-                local ok, found = pcall(OpponentUnit, d.opp)
-                unit = ok and found or nil
-            end
-            SetFace(f.them, d.opp.class, unit, who)
-        end
     end
 
     local function UpdateDuelFrame(now)
@@ -2606,7 +2533,7 @@ do
                 text = ("Starts in %d..."):format(duel.start - now)
             elseif now < duel.finish then
                 local left = duel.finish - now
-                text = ("|cffffd100%d:%02d|r  - jump!"):format(math.floor(left / 60), left % 60)
+                text = ("%d:%02d left - jump!"):format(math.floor(left / 60), left % 60)
             else
                 text = "Time! Waiting for the final score..."
             end
@@ -2893,7 +2820,7 @@ do
 
     function CreateDuelFrame()
         local f = CreateFrame("Frame", "JumpCounterDuelFrame", UIParent, "BackdropTemplate")
-        f:SetSize(390, 150)
+        f:SetSize(250, 70)
         StyleBox(f, "Jump duel")
         f:SetFrameStrata("HIGH")
         local pos = JumpCounterDB.ui.duelPos
@@ -2908,131 +2835,14 @@ do
             local point, _, relPoint, x, y = self:GetPoint()
             JumpCounterDB.ui.duelPos = { point, relPoint, x, y }
         end)
-
-        -- One side: portrait in a gold ring, name, and the score in big digits.
-        local big = GameFontNormalHuge and "GameFontNormalHuge" or "GameFontNormalLarge"
-        local function Side(left)
-            local s = {}
-            local corner, dir = left and "TOPLEFT" or "TOPRIGHT", left and 1 or -1
-            s.icon = f:CreateTexture(nil, "ARTWORK")
-            s.icon:SetSize(40, 40)
-            s.icon:SetPoint(corner, dir * 14, -30)
-            -- (our own ring image - see Media\Media2.lua; none until the game
-            -- has been restarted after the update that added it)
-            if JumpCounter_Media2 then
-                s.ring = f:CreateTexture(nil, "OVERLAY")
-                s.ring:SetSize(52, 52)
-                s.ring:SetPoint("CENTER", s.icon)
-                s.ring:SetTexture("Interface\\AddOns\\JumpCounter\\Media\\ring")
-            end
-            -- The name has its half of the window to itself (up to the
-            -- middle); a longer one is cut with "...". "VS" sits lower,
-            -- between the scores, so no name can run into it.
-            s.name = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            s.name:SetPoint(corner, dir * 64, -28)
-            s.name:SetSize(124, 14)
-            s.name:SetJustifyH(left and "LEFT" or "RIGHT")
-            s.name:SetWordWrap(false)
-            if s.name.SetMaxLines then s.name:SetMaxLines(1) end
-            s.score = f:CreateFontString(nil, "OVERLAY", big)
-            s.score:SetPoint(corner, dir * 64, -45)
-            s.score:SetWidth(90)
-            s.score:SetJustifyH(left and "LEFT" or "RIGHT")
-            return s
-        end
-        f.me, f.them = Side(true), Side(false)
-
-        f.vs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        f.vs:SetPoint("TOP", 0, -47)
-        f.vs:SetText("|cffff5540VS|r")
+        -- The title is on the plate ("Jump duel vs <name>"); then the score
+        -- and the clock.
+        f.title:SetWidth(232)
+        f.title:SetWordWrap(false)
+        f.score = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+        f.score:SetPoint("TOP", 0, -27)
         f.time = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        f.time:SetPoint("BOTTOM", 0, 9)
-        f.time:SetWidth(300)
-
-        -- Who is ahead: your jumps in green from the left, theirs in red.
-        f.bar = CreateFrame("StatusBar", nil, f)
-        f.bar:SetHeight(7)
-        f.bar:SetPoint("BOTTOMLEFT", 14, 27)
-        f.bar:SetPoint("BOTTOMRIGHT", -14, 27)
-        f.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-        f.bar:SetStatusBarColor(0.15, 0.7, 0.15)
-        local theirs = f.bar:CreateTexture(nil, "BACKGROUND")
-        theirs:SetAllPoints()
-        theirs:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
-        theirs:SetVertexColor(0.75, 0.15, 0.12)
-        local edge = f.bar:CreateTexture(nil, "BACKGROUND", nil, -1)
-        edge:SetPoint("TOPLEFT", -1, 1)
-        edge:SetPoint("BOTTOMRIGHT", 1, -1)
-        edge:SetColorTexture(0.45, 0.38, 0.22, 0.9)
-        local middle = f.bar:CreateTexture(nil, "OVERLAY")
-        middle:SetColorTexture(1, 0.82, 0, 0.9)
-        middle:SetSize(1, 11)
-        middle:SetPoint("CENTER")
-
-        -- Two little adventurers standing on the bar, in each player's class
-        -- colour, that hop whenever that player's score goes up. Our own
-        -- drawings (Media\figure.tga: four frames side by side - stand,
-        -- crouch, in the air, coming down - and figure_tint.tga with the
-        -- parts that take the class colour); see Media\Media2.lua.
-        if JumpCounter_Media2 then
-            local SIZE, HOP, TIME = 34, 20, 0.44
-            local function Figure(side, x, flip)
-                side.figTint = f:CreateTexture(nil, "ARTWORK", nil, 1)
-                side.figTint:SetTexture("Interface\\AddOns\\JumpCounter\\Media\\figure_tint")
-                side.fig = f:CreateTexture(nil, "ARTWORK", nil, 2)
-                side.fig:SetTexture("Interface\\AddOns\\JumpCounter\\Media\\figure")
-                side.hops = 0
-                function side.Pose(frame, y)
-                    local l, r = frame * 0.25, (frame + 1) * 0.25
-                    if flip then l, r = r, l end        -- the one on the right looks left
-                    side.figTint:SetTexCoord(l, r, 0, 1)
-                    side.figTint:SetPoint("BOTTOM", f.bar, "TOPLEFT", x, y)
-                    side.fig:SetTexCoord(l, r, 0, 1)
-                    side.fig:SetPoint("BOTTOM", f.bar, "TOPLEFT", x, y)
-                end
-                side.figTint:SetSize(SIZE, SIZE)
-                side.fig:SetSize(SIZE, SIZE)
-                side.Pose(0, 0)
-            end
-            local barW = 390 - 28
-            Figure(f.me, barW * 0.25, false)
-            Figure(f.them, barW * 0.75, true)
-
-            -- Runs only while someone is hopping.
-            local function Step(side, elapsed)
-                if not side.t and side.hops > 0 then
-                    side.hops, side.t = side.hops - 1, 0
-                end
-                if not side.t then return false end
-                side.t = side.t + elapsed
-                local p = side.t / TIME
-                if p >= 1 then
-                    side.t = nil
-                    side.Pose(0, 0)
-                elseif p < 0.15 then
-                    side.Pose(1, 0)                                 -- crouch
-                else
-                    local q = (p - 0.15) / 0.85                     -- up and down again
-                    side.Pose(q < 0.6 and 2 or 3, HOP * 4 * q * (1 - q))
-                end
-                return side.t ~= nil or side.hops > 0
-            end
-            local function Animate(self, elapsed)
-                local a, b = Step(self.me, elapsed), Step(self.them, elapsed)
-                if not (a or b) then self:SetScript("OnUpdate", nil) end
-            end
-            -- score: the side's new score; a higher one than before is a hop
-            -- (two at most waiting, so a burst of scores doesn't hop for ages).
-            function f.Score(side, score, class)
-                local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
-                side.figTint:SetVertexColor(c and c.r or 1, c and c.g or 1, c and c.b or 1)
-                if side.last and score > side.last then
-                    side.hops = math.min(side.hops + 1, 2)
-                    f:SetScript("OnUpdate", Animate)
-                end
-                side.last = score
-            end
-        end
+        f.time:SetPoint("TOP", f.score, "BOTTOM", 0, -4)
         f:Hide()
         duelFrame = f
     end
@@ -3522,6 +3332,8 @@ local function ShowEntryTooltip(owner, entry)
     end
     local wins = isMe and (acct.duelWins or 0) or data.duelWins
     if wins then line("Duels won", tostring(wins)) end
+    local best = isMe and (acct.stats.bestDuel or 0) or data.duelBest
+    if best and best > 0 then line("Best duel", best .. " jumps") end   -- 1.8.9+
 
     -- Characters on the account (from 1.1.0; older versions count one character).
     local chars
@@ -3916,7 +3728,6 @@ local BOARD_COLUMNS = {
           return ("Jumps since the hour started (%s-%s). Whoever has the most holds the crown.")
               :format(date("%H:00"), date("%H:00", time() + 3600))
       end },
-    { label = "This week",  width = 64,  justify = "RIGHT", sort = "week", tip = "Jumps since the weekly reset." },
     { label = "Avg/hour",   width = 66,  justify = "RIGHT", sort = "rate",
       tip = "Average jumps per hour of online time over the last 7 days (time flagged AFK doesn't count)." },
     { label = "Deaths",     width = 48,  justify = "RIGHT", sort = "deaths" },
@@ -3924,6 +3735,8 @@ local BOARD_COLUMNS = {
       tip = "Duel rank and duel points. Winning takes points from your opponent - more if they're "
           .. "ranked higher - and losing gives them yours. No losses below Contender." },
     { label = "Wins",       width = 46,  justify = "RIGHT", sort = "wins", tip = "Jump duels won." },
+    { label = "Best duel",  width = 64,  justify = "RIGHT", sort = "best",
+      tip = "Most jumps in a single jump duel (counted since version 1.8.7; shown for players on 1.8.9 or newer)." },
 }
 
 -- Everyone on the board with every column's value, sorted by one of them.
@@ -3936,7 +3749,8 @@ local function BuildTable(sort)
             all = data.total or 0, hour = HourCount(data),
             week = (wid and data.weekId == wid) and (data.week or 0) or 0,
             rate = JumpsPerHour(data), level = EntryXP(data), deaths = data.deaths,
-            duels = data.duelPoints, duelWins = data.duelWins, wins = data.duelWins })
+            duels = data.duelPoints, duelWins = data.duelWins, wins = data.duelWins,
+            best = data.duelBest })
     end
     add(playerKey, Me(), true)
     local byName = {}
@@ -4113,17 +3927,17 @@ local function BuildLeaderboardTab(page, width)
             c[4]:SetText(title and ("|cffffd100" .. title .. "|r") or GRAY:format("-"))
             c[5]:SetText(num(entry.all, "all"))
             c[6]:SetText(num(entry.hour, "hour"))
-            c[7]:SetText(num(entry.week, "week"))
-            c[8]:SetText(entry.rate and num(entry.rate, "rate") or GRAY:format("-"))
-            c[9]:SetText(num(entry.deaths, "deaths"))
+            c[7]:SetText(entry.rate and num(entry.rate, "rate") or GRAY:format("-"))
+            c[8]:SetText(num(entry.deaths, "deaths"))
             if entry.duels then
                 local rank = DuelRank(entry.duels)
-                c[10]:SetText(((sort == "duels") and "|cffffffff" or "|cffc8c8c8") .. rank .. "|r "
+                c[9]:SetText(((sort == "duels") and "|cffffffff" or "|cffc8c8c8") .. rank .. "|r "
                     .. GRAY:format(Fmt(entry.duels)))
             else
-                c[10]:SetText(GRAY:format("-"))
+                c[9]:SetText(GRAY:format("-"))
             end
-            c[11]:SetText(entry.wins and num(entry.wins, "wins") or GRAY:format("-"))
+            c[10]:SetText(entry.wins and num(entry.wins, "wins") or GRAY:format("-"))
+            c[11]:SetText(entry.best and num(entry.best, "best") or GRAY:format("-"))
         end
         return row
     end
@@ -4214,11 +4028,12 @@ local function BuildLeaderboardTab(page, width)
             level = "XP = jumps + challenge, duel and crown rewards",
             duels = "duel points: win them from your opponent - more against stronger players",
             wins = "jump duels won",
+            best = "most jumps in a single jump duel",
         })[mode] or "click a column to sort - hover a player for details"
         self.footer:SetText(count .. "  -  " .. note)
 
         -- The gap to the player above (or your lead), in the sorted column.
-        local unit = ({ all = "jumps", hour = "jumps this hour", week = "jumps this week", level = "XP",
+        local unit = ({ all = "jumps", hour = "jumps this hour", level = "XP",
             duels = "duel points", wins = "wins" })[mode]
         local gap = ""
         local mine = self.myEntry and self.myEntry[mode]

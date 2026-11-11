@@ -728,13 +728,14 @@ local function InitDB()
         if (data.seen or 0) < (data.acct and cutoff or oldCutoff) then db.peers[key] = nil end
     end
     -- 1.8.11: your board is your guild, your friends and the people they
-    -- know directly. Once, drop players met only in a dungeon/raid/battleground
-    -- group and everything passed along by older versions (that could be
-    -- second-hand or a stranger from someone's group). Your friends' current
-    -- versions send theirs again within minutes.
+    -- know directly. Once, drop everything passed along by older versions
+    -- (that could be second-hand or a stranger from someone's group). Your
+    -- friends' current versions send theirs again within minutes. Players
+    -- met in a group are sorted out a minute after login (DropGroupStrangers),
+    -- once the guild roster and friends lists have loaded.
     if (db.circles or 0) < 1 then
         for key, data in pairs(db.peers) do
-            if data.via == "RELAY" or (data.via == "GROUP" and not data.friend) then db.peers[key] = nil end
+            if data.via == "RELAY" then db.peers[key] = nil end
         end
         db.circles = 1
     end
@@ -5424,6 +5425,66 @@ events:SetScript("OnEvent", function(_, event, ...)
         JumpCounterDB.jumpTrace = nil      -- left over from a 1.8.5 test build
         hooksecurefunc("JumpOrAscendStart", OnJump)
         Print(("v%s loaded - type /jumps to open."):format(VERSION))
+
+        -- 1.8.11: once, players last heard in a dungeon/raid/battleground
+        -- group (older versions sent scores there) leave the board - unless
+        -- they're in your guild or on your friends list. Waits for the guild
+        -- roster; until then nobody is dropped.
+        local groupTries = 0
+        local function DropGroupStrangers()
+            local db = JumpCounterDB
+            if (db.circles or 0) >= 2 then return end
+            local any = false
+            for _, d in pairs(db.peers) do
+                if d.via == "GROUP" and not d.friend then any = true break end
+            end
+            if any and IsInGuild() and GetNumGuildMembers and (GetNumGuildMembers() or 0) == 0 then
+                groupTries = groupTries + 1
+                if groupTries > 10 then return end      -- roster never came: next login
+                if C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster()
+                elseif GuildRoster then GuildRoster() end
+                C_Timer.After(30, DropGroupStrangers)
+                return
+            end
+            if any then
+                local known = {}          -- first names on your friends lists
+                if C_FriendList and C_FriendList.GetNumFriends then
+                    for i = 1, C_FriendList.GetNumFriends() do
+                        local info = C_FriendList.GetFriendInfoByIndex(i)
+                        if info and info.name then known[FirstWord(info.name:match("^[^-]+") or info.name)] = true end
+                    end
+                end
+                if BNGetNumFriends and C_BattleNet and C_BattleNet.GetFriendNumGameAccounts then
+                    for i = 1, (BNGetNumFriends()) do
+                        for j = 1, (C_BattleNet.GetFriendNumGameAccounts(i) or 0) do
+                            local g = C_BattleNet.GetFriendGameAccountInfo(i, j)
+                            if g and g.characterName then known[FirstWord(g.characterName)] = true end
+                        end
+                    end
+                end
+                local myGuild = GetGuildInfo and Plain((GetGuildInfo("player"))) or nil
+                for key, d in pairs(db.peers) do
+                    if d.via == "GROUP" and not d.friend then
+                        local first = key:match("^[^-~]+") or key
+                        local keep = known[FirstWord(first)] or (d.display and known[FirstWord(d.display)])
+                            or (myGuild and d.guild == myGuild)
+                        if not keep and IsInGuild() and C_GuildInfo and C_GuildInfo.MemberExistsByName then
+                            local ok, yes = pcall(C_GuildInfo.MemberExistsByName, first)
+                            keep = ok and yes
+                        end
+                        if not keep then db.peers[key] = nil end
+                    end
+                end
+            end
+            db.circles = 2
+        end
+        if (JumpCounterDB.circles or 0) < 2 then
+            if IsInGuild() then
+                if C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster()
+                elseif GuildRoster then GuildRoster() end
+            end
+            C_Timer.After(45, DropGroupStrangers)
+        end
 
         CreateDuelFrame()
         C_Timer.NewTicker(60, MaybeStartRandomDuel)

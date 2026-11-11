@@ -3,6 +3,10 @@
 All changes to Jumps, newest first. The addon updates itself through the CurseForge app;
 after an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [1.8.12] - Unreleased
+
+- **Guildmates and friends you'd been in a party with no longer drop off the board** when you update. The 1.8.11 clean-up sometimes took them for strangers from a group (they came back the next time they jumped). It now checks your guild and friends lists first.
+
 ## [1.8.11] - 2026-11-11
 
 - **A new, shorter name: Jumps** - the same as the `/jumps` command, and a lot shorter at the start of every chat line. Nothing else changes: your progress, settings and commands stay. (The download is now called `Jumps-1.8.11.zip`; the folder inside is still `JumpCounter`.)

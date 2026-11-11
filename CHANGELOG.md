@@ -3,6 +3,10 @@
 All changes to Jumps, newest first. The addon updates itself through the CurseForge app;
 after an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [1.8.13] - Unreleased
+
+- **Two challenges got reachable goals:** since only full jumps count, they asked for more jumps than you can fit in the time. Your best so far counts, so if you've already beaten the new goal, it completes when you log in.
+
 ## [1.8.12] - 2026-11-11
 
 - **Guildmates and friends you'd been in a party with no longer drop off the board** when you update. The 1.8.11 clean-up sometimes took them for strangers from a group (they came back the next time they jumped). It now checks your guild and friends lists first.

@@ -1,7 +1,7 @@
 name: Upload to CurseForge
 
 # Every published GitHub release is uploaded to the CurseForge project
-# "JumpingCounter" as a Release file for WoW Forever. The game version is
+# "Jumps" as a Release file for WoW Forever. The game version is
 # worked out from "## Interface:" in JumpCounter.toc (16001 -> 1.60.1).
 # Run it by hand (Actions tab) to retry a release, or with "dry run" to only
 # check the token and the game version.
@@ -61,13 +61,18 @@ jobs:
 
           gh release download "$TAG" --pattern '*.zip' --dir dist --repo "$GITHUB_REPOSITORY"
           zip=$(ls dist/*.zip | head -n 1)
-          changelog=$(gh release view "$TAG" --json body --jq .body --repo "$GITHUB_REPOSITORY")
-          metadata=$(jq -n --arg changelog "$changelog" --arg name "JumpingCounter ${TAG#v}" --argjson versions "$ids" \
+          # The changelog shown on CurseForge: this version's section of
+          # CHANGELOG.md. Without one (older tags), the release's own text.
+          changelog=$(awk -v v="${TAG#v}" 'index($0, "## [" v "]") == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md 2>/dev/null || true)
+          if [ -z "$(printf '%s' "$changelog" | tr -d '[:space:]')" ]; then
+            changelog=$(gh release view "$TAG" --json body --jq .body --repo "$GITHUB_REPOSITORY")
+          fi
+          metadata=$(jq -n --arg changelog "$changelog" --arg name "Jumps ${TAG#v}" --argjson versions "$ids" \
             '{changelog: $changelog, changelogType: "markdown", displayName: $name,
               gameVersions: $versions, releaseType: "release"}')
 
           if [ "$DRY_RUN" = "true" ]; then
-            echo "Dry run: token works. Would upload $zip as 'JumpingCounter ${TAG#v}' for $game_version."
+            echo "Dry run: token works. Would upload $zip as 'Jumps ${TAG#v}' for $game_version."
             exit 0
           fi
 

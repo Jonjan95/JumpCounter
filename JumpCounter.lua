@@ -1,4 +1,4 @@
--- JumpCounter: counts your jumps and shares totals with guild/group members
+-- JumpCounter: counts your jumps and shares totals with your guild and friends
 -- who also run the addon, so you can compete on a leaderboard.
 
 local ADDON_NAME = ...
@@ -54,7 +54,7 @@ local GetMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 local VERSION = GetMetadata(ADDON_NAME, "Version") or "0"
 
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99JumpingCounter|r: " .. msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Jumps|r: " .. msg)
 end
 
 -- In combat (boss fights especially) the game hides some values from addons
@@ -85,7 +85,7 @@ end
 -- opens the window with the link.
 ---------------------------------------------------------------------------
 -- Unlisted project: only reachable through this link.
-local CURSEFORGE_URL = "https://www.curseforge.com/wow/addons/jumpingcounter"
+local CURSEFORGE_URL = "https://www.curseforge.com/wow/addons/jumps"
 local updateShown = false
 
 -- The newer version we know of, or nil if we're up to date.
@@ -727,6 +727,17 @@ local function InitDB()
     for key, data in pairs(db.peers) do
         if (data.seen or 0) < (data.acct and cutoff or oldCutoff) then db.peers[key] = nil end
     end
+    -- 1.8.11: your board is your guild, your friends and the people they
+    -- know directly. Once, drop players met only in a dungeon/raid/battleground
+    -- group and everything passed along by older versions (that could be
+    -- second-hand or a stranger from someone's group). Your friends' current
+    -- versions send theirs again within minutes.
+    if (db.circles or 0) < 1 then
+        for key, data in pairs(db.peers) do
+            if data.via == "RELAY" or (data.via == "GROUP" and not data.friend) then db.peers[key] = nil end
+        end
+        db.circles = 1
+    end
 
     local name = UnitName("player")
     playerKey = name .. "-" .. MyRealm()
@@ -773,6 +784,7 @@ local function InitDB()
     charData = db.chars[charKey]
     charData.class = class
     charData.name = name
+    charData.hidden = nil             -- logged in on it again: shown again (1.8.11)
 
     -- If this client tracks statistics, start the death counter from the
     -- game's own "Total deaths" (statistic 60). Otherwise it starts at 0.
@@ -869,6 +881,7 @@ local function Me()
         prestige = acct.prestige, prestigeSpent = acct.prestigeSpent, done = acct.done,
         duelWins = acct.duelWins or 0, duelPoints = acct.duelPoints or 0, faction = MyFaction(),
         duelBest = acct.stats and acct.stats.bestDuel or 0,
+        guild = GetGuildInfo and Plain((GetGuildInfo("player"))) or nil,
         hourId = acct.hourId, hour = acct.hour, crowns = acct.crowns or 0,
         class = charData.class, display = charData.display }
     for _, c in pairs(JumpCounterDB.chars) do
@@ -881,29 +894,29 @@ local function Me()
 end
 
 -- Your characters, most jumps first: { { key, name, total, class }, ... }
+-- (1.8.11: characters hidden with /jumps forget are left out - their jumps
+-- still count in your total)
 local function MyCharacters()
     local list = {}
     for key, c in pairs(JumpCounterDB.chars) do
-        table.insert(list, { key = key, name = c.display or c.name or key:match("^[^-]+") or key,
-            total = c.total or 0, class = c.class })
+        if not c.hidden then
+            table.insert(list, { key = key, name = c.display or c.name or key:match("^[^-]+") or key,
+                total = c.total or 0, class = c.class })
+        end
     end
     table.sort(list, function(a, b) return a.total > b.total end)
     return list
 end
 
 ---------------------------------------------------------------------------
--- Networking (guild / party / raid addon messages)
+-- Networking (guild, friends and Battle.net friends)
 ---------------------------------------------------------------------------
+-- 1.8.11: no more party / raid / instance chat. Everyone in your group who
+-- belongs on your board is in your guild or on a friends list anyway, and a
+-- random player from a dungeon or battleground shouldn't end up on it.
 local function GetChannels()
     local channels = {}
     if IsInGuild() then table.insert(channels, "GUILD") end
-    if IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
-        table.insert(channels, "INSTANCE_CHAT")
-    elseif IsInRaid() then
-        table.insert(channels, "RAID")
-    elseif IsInGroup() then
-        table.insert(channels, "PARTY")
-    end
     return channels
 end
 
@@ -921,19 +934,19 @@ end
 local knownBNet = {}      -- [gameAccountID] = GetTime() we last heard from them
 local BNET_HEARD_RECENTLY = 3600
 
--- Online characters on your WoW friends list who aren't reached via guild/group.
+-- Online characters on your WoW friends list who aren't reached via the guild.
 local function GetOnlineFriends()
     local names = {}
     if not (C_FriendList and C_FriendList.GetNumFriends) then return names end
     for i = 1, C_FriendList.GetNumFriends() do
         local info = C_FriendList.GetFriendInfoByIndex(i)
         if info and info.connected and info.name then
-            local short = info.name:match("^[^-]+")
-            local inGuildOrGroup = UnitInParty(short) or UnitInRaid(short)
-            if not inGuildOrGroup and IsInGuild() and C_GuildInfo and C_GuildInfo.MemberExistsByName then
-                inGuildOrGroup = C_GuildInfo.MemberExistsByName(info.name)
+            -- (Friends in your group are whispered too: group chat isn't used.)
+            local inGuild = false
+            if IsInGuild() and C_GuildInfo and C_GuildInfo.MemberExistsByName then
+                inGuild = C_GuildInfo.MemberExistsByName(info.name)
             end
-            if not inGuildOrGroup then table.insert(names, info.name) end
+            if not inGuild then table.insert(names, info.name) end
         end
     end
     return names
@@ -1010,14 +1023,14 @@ do
     -- 1 = duel messages (time-critical), 2 = scores and requests, 3 = passed-along scores.
     local function SendPriority(msg)
         local tag = msg:match("^[^:]+")
-        if tag == "R" then return 3 end
+        if tag == "R" or tag == "R2" then return 3 end
         if tag and tag:match("^D[QAGPF]$") then return 1 end
         return 2
     end
 
     function Enqueue(msg, channel, target, bnet)
-        -- Relayed scores ("R:<acct>:...") are one message per account.
-        local kind = msg:match("^(R:[^:]+)") or msg:match("^[^:]+") or msg
+        -- Relayed scores ("R2:<acct>:...") are one message per account.
+        local kind = msg:match("^(R2?:[^:]+)") or msg:match("^[^:]+") or msg
         local id = (bnet and "bn" or channel) .. ":" .. tostring(target) .. ":" .. kind
         if queuedKeys[id] then
             -- Already waiting to go out: just send the newest content.
@@ -1108,6 +1121,11 @@ function ScoreMessage()
         .. ":" .. (acct.prestigeSpent or 0)                     -- 1.8.2: XP used by prestige stars
         .. ":" .. (acct.duelPoints or 0)                        -- 1.8.2: duel rank points
         .. ":" .. (acct.stats.bestDuel or 0)                    -- 1.8.9: most jumps in one duel
+    -- 1.8.11: guild name ("" = none), for the leaderboard's guild filter and
+    -- ranking. Left out altogether in the rare case it doesn't fit (the
+    -- receiver then falls back on the channel the score came through).
+    local guild = (tostring(GetGuildInfo and Plain((GetGuildInfo("player"))) or ""):gsub(":", ""))
+    if #msg + 1 + #suffix + 1 + #guild <= MAX_MESSAGE then suffix = suffix .. ":" .. guild end
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -1205,7 +1223,7 @@ end
 local REQUEST_COOLDOWN = 300
 local lastRequestTime = -REQUEST_COOLDOWN
 
--- Login: ask friends and group directly (cheap), not the whole guild.
+-- Login: ask friends directly (cheap), not the whole guild.
 local function RequestScoresAtLogin()
     Send("REQ", true, true)
 end
@@ -1231,8 +1249,10 @@ end
 ---------------------------------------------------------------------------
 -- Passing scores along (1.6.0). Players also share the scores they know, so
 -- friends of friends show up too - including the other faction through a
--- Battle.net friend. Scores are passed on at most twice (hops), only if
--- updated in the last RELAY_MAX_AGE, and in small batches:
+-- Battle.net friend. Scores are passed on once (1.8.11; twice before): only
+-- players we heard ourselves - our guild and our friends - so each group of
+-- friends and each guild keeps its own board, and a friend's friend's guild
+-- never shows up. Only if updated in the last RELAY_MAX_AGE, in small batches:
 --  * to a friend (whisper / Battle.net) whenever we hear from them (at most
 --    once a minute, and every minute while we've heard from them lately):
 --    only scores they haven't had from us yet, or that changed (RELAY_RESEND;
@@ -1240,7 +1260,7 @@ end
 --  * to the guild, only scores that didn't come from the guild: everything
 --    every RELAY_GUILD_INTERVAL, changed hour counts every RELAY_LIVE,
 --    skipping what someone else already sent.
--- R:<acct>:<key>:<name>:<class>:<faction>:<total>:<weekId>:<week>:<deaths>
+-- R2:<acct>:<key>:<name>:<class>:<faction>:<total>:<weekId>:<week>:<deaths>
 --  :<char level>:<xp>:<challenges>:<jph>:<prestige>:<duel wins>:<version>:<seen>:<hops>
 ---------------------------------------------------------------------------
 -- Lua 5.1 allows at most 200 locals per file, so helpers live in do-blocks
@@ -1249,7 +1269,7 @@ local RELAY_GUILD_INTERVAL = 600
 local RelayToContact, RelayToGuild, ApplyRelay, RelayTick
 do
     local RELAY_MAX_AGE = 3 * 86400
-    local RELAY_MAX_HOPS = 2
+    local RELAY_MAX_HOPS = 1          -- 1.8.11: first-hand only (2 before)
     local RELAY_BATCH = 40
     local RELAY_CONTACT_GAP = 60      -- at most one batch a minute per friend
     local RELAY_RESEND = 600          -- resend a score to a friend at most every 10 min
@@ -1274,7 +1294,7 @@ do
 
     local function RelayMessage(key, data)
         local function n(v) return v ~= nil and tostring(v) or "" end
-        return table.concat({ "R", data.acct, NoColon(key), NoColon(data.display), n(data.class),
+        local parts = { "R2", data.acct, NoColon(key), NoColon(data.display), n(data.class),
             n(data.faction), n(data.total), n(data.weekId), n(data.week), n(data.deaths),
             n(data.charLevel), n(data.xp), n(data.challenges), n(data.jph), n(data.prestige),
             n(data.duelWins), n(data.version), n(data.seen), (data.hops or 0) + 1,
@@ -1282,7 +1302,12 @@ do
             n(data.duelLosses), n(data.duelDraws),
             n(data.hourId), n(data.hour), n(data.crowns),          -- 1.8.0
             n(data.prestigeSpent), n(data.duelPoints),              -- 1.8.2
-            n(data.duelBest) }, ":")                                -- 1.8.9
+            n(data.duelBest) }                                      -- 1.8.9
+        local msg = table.concat(parts, ":")
+        -- 1.8.11: their guild, when there's room for it.
+        local guild = NoColon(data.guild)
+        if #msg + 1 + #guild <= MAX_MESSAGE then msg = msg .. ":" .. guild end
+        return msg
     end
 
     -- Up to RELAY_BATCH passable scores (newest first) that pass filter(data).
@@ -1290,7 +1315,8 @@ do
         local list = {}
         local now = time()
         for key, data in pairs(JumpCounterDB.peers) do
-            if data.acct and (data.hops or 0) < RELAY_MAX_HOPS and now - (data.seen or 0) <= RELAY_MAX_AGE
+            if data.acct and (data.hops or 0) < RELAY_MAX_HOPS and data.via ~= "GROUP" and data.via ~= "RELAY"
+                and now - (data.seen or 0) <= RELAY_MAX_AGE
                 and filter(data) then
                 table.insert(list, { key = key, data = data })
             end
@@ -1359,10 +1385,11 @@ do
     function ApplyRelay(msg, via)
         local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
             rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws,
-            rHourId, rHour, rCrowns, rSpent, rPoints, rBest = strsplit(":", msg)
+            rHourId, rHour, rCrowns, rSpent, rPoints, rBest, rGuild = strsplit(":", msg)
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
+        if tonumber(rHops) ~= RELAY_MAX_HOPS then return end      -- first-hand scores only
         if via == "GUILD" then
             -- Someone else already passed this around the guild.
             guildRelayed[rAcct] = math.max(guildRelayed[rAcct] or 0, rSeen)
@@ -1403,9 +1430,10 @@ do
         entry.hourId, entry.hour, entry.crowns = num(rHourId), num(rHour), num(rCrowns)   -- 1.8.0
         entry.prestigeSpent, entry.duelPoints = num(rSpent), num(rPoints)               -- 1.8.2
         entry.duelBest = num(rBest)                                                     -- 1.8.9
+        if rGuild and rGuild ~= "" then entry.guild = rGuild end                        -- 1.8.11
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
-        entry.hops = tonumber(rHops) or RELAY_MAX_HOPS
+        entry.hops = RELAY_MAX_HOPS
         entry.via = "RELAY"
         peers[key] = entry
         NoteVersion(entry.version)
@@ -1455,19 +1483,23 @@ end
 
 -- key/display: who sent it, as best the channel can tell us.
 -- reply(msg): sends a message straight back to the sender, or nil.
--- via: "GUILD", "GROUP", "WHISPER" or "BNET".
+-- via: "GUILD", "WHISPER" or "BNET" ("GROUP" before 1.8.11).
 local function HandleMessage(msg, key, display, reply, via)
     if msg:match("^D[QAGPFN]:") then
         OnDuelMessage(msg, reply, via)
         return
     end
-    if msg:match("^R:") then
+    -- 1.8.11: only "R2" - first-hand scores. Older versions' "R" could be
+    -- second-hand or a stranger from their group, so it's ignored.
+    if msg:match("^R2:") then
         ApplyRelay(msg, via)
         return
     end
+    if msg:match("^R:") then return end
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
         charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction,
-        duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent, duelPoints, duelBest = strsplit(":", msg)
+        duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent, duelPoints, duelBest,
+        guildName = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -1549,6 +1581,15 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.prestigeSpent = tonumber(prestigeSpent)   -- these two are nil before 1.8.2
         entry.duelPoints = tonumber(duelPoints)
         entry.duelBest = tonumber(duelBest)       -- nil before 1.8.9
+        -- 1.8.11: their guild ("" = none). Older versions don't say: someone
+        -- heard on the guild channel is in ours.
+        if guildName then
+            entry.guild = guildName ~= "" and guildName or nil
+        elseif via == "GUILD" then
+            entry.guild = GetGuildInfo and Plain((GetGuildInfo("player"))) or entry.guild
+        end
+        -- Reached through the friends list or Battle.net: a friend (kept).
+        if via == "WHISPER" or via == "BNET" then entry.friend = true end
         entry.via, entry.hops = via, 0            -- heard directly
         entry.directSeen = time()
         entry.version = (version and version ~= "") and version or nil
@@ -1583,7 +1624,7 @@ local function HandleMessage(msg, key, display, reply, via)
             -- Asked directly (whisper / Battle.net); answer directly.
             reply(ScoreMessage())
         elseif GetTime() - lastReplyTime > 10 then
-            -- Someone asked the guild/group; answer once, after a random
+            -- Someone asked the guild; answer once, after a random
             -- delay so a big guild doesn't all answer in the same second.
             lastReplyTime = GetTime()
             C_Timer.After(math.random() * 10, function()
@@ -1596,13 +1637,16 @@ end
 
 local function OnAddonMessage(prefix, msg, channel, sender)
     if prefix ~= PREFIX then return end
+    -- 1.8.11: party / raid / instance chat is ignored - older versions still
+    -- send there, and that's how strangers from a random group got on the board.
+    if channel ~= "GUILD" and channel ~= "WHISPER" then return end
     local key, display = NormalizeSender(sender)
     local reply
     if channel == "WHISPER" then
         knownWhisper[WhisperId(sender)] = true
         reply = function(m) SendWhisper(sender, m) end
     end
-    local via = (channel == "GUILD" and "GUILD") or (channel == "WHISPER" and "WHISPER") or "GROUP"
+    local via = channel == "GUILD" and "GUILD" or "WHISPER"
     HandleMessage(msg, key, display, reply, via)
 end
 
@@ -1745,14 +1789,14 @@ do
 
         local cfLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         cfLabel:SetPoint("TOPLEFT", 24, -92)
-        cfLabel:SetText("Update on CurseForge |cff999999(JumpingCounter)|r")
+        cfLabel:SetText("Update on CurseForge |cff999999(Jumps)|r")
         f.cf = LinkBox(f, CURSEFORGE_URL, W - 56)
         f.cf:SetPoint("TOPLEFT", cfLabel, "BOTTOMLEFT", 6, -4)
 
         local auto = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         auto:SetPoint("TOP", 0, -144)
         auto:SetWidth(W - 40)
-        auto:SetText("Want automatic updates? Right-click JumpingCounter in the "
+        auto:SetText("Want automatic updates? Right-click Jumps in the "
             .. "CurseForge app > |cffffd100Install settings|r > |cffffd100Automatic|r.")
 
         local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -1773,11 +1817,11 @@ do
     function ShowUpdateWindow(newer)
         frame = frame or Create()
         if newer then
-            frame.title:SetText(("JumpingCounter v%s is out!"):format(newer))
+            frame.title:SetText(("Jumps v%s is out!"):format(newer))
             frame.text:SetText(("You have v%s. Update to get the latest features and fixes - "
                 .. "and to keep playing with friends on the newest version."):format(VERSION))
         else
-            frame.title:SetText("Get JumpingCounter")
+            frame.title:SetText("Get Jumps")
             frame.text:SetText(("You have v%s, the newest version seen so far. "
                 .. "Share this link with friends:"):format(VERSION))
         end
@@ -1837,8 +1881,8 @@ local function CreateCounterFrame()
     end)
     f:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("JumpingCounter")
-        GameTooltip:AddLine("Drag to move, right-click to open JumpingCounter.", 1, 1, 1)
+        GameTooltip:AddLine("Jumps")
+        GameTooltip:AddLine("Drag to move, right-click to open Jumps.", 1, 1, 1)
         GameTooltip:AddLine("/jumps help for commands.", 1, 1, 1)
         GameTooltip:Show()
     end)
@@ -2520,7 +2564,7 @@ end
 -- for a 30-second jump-off. Whoever jumps most wins, and everyone online
 -- with the addon sees the result.
 --
--- Messages (sent like scores: guild, group and friends who use the addon):
+-- Messages (sent like scores: guild and friends who use the addon):
 --   DQ:<id>:<start>:<acct>:<name>:<class>:<target acct>:<manual>:<length>  invite
 --   DA:<id>:<acct>                                              accept
 --   DG:<id>:<start>:<acct>:<name>:<class>:<acct>:<name>:<class>  go (from the inviter)
@@ -2568,7 +2612,7 @@ do
     end
 
     -- Only to the opponent: the way their messages reach us (whisper /
-    -- Battle.net directly, else guild or group chat). Unknown: everyone.
+    -- Battle.net directly, else guild chat). Unknown: everyone.
     function SendDuelTo(d, ...)
         local parts = { ... }
         for i = 1, select("#", ...) do parts[i] = tostring(parts[i] or "") end
@@ -2578,11 +2622,6 @@ do
             route.reply(msg)
         elseif route and route.via == "GUILD" and IsInGuild() then
             Enqueue(msg, "GUILD")
-        elseif route and route.via == "GROUP" then
-            for _, ch in ipairs(GetChannels()) do
-                if ch ~= "GUILD" then Enqueue(msg, ch) return end
-            end
-            Send(msg)
         else
             Send(msg)
         end
@@ -2864,7 +2903,7 @@ do
         local now = GetServerTime()
         if not id or id == "" then return end
         -- Remember how this message reached us, to send our progress back the
-        -- same way (a direct route - whisper / Battle.net - beats guild/group).
+        -- same way (a direct route - whisper / Battle.net - beats the guild).
         local from = (tag == "DQ" or tag == "DG") and a2 or a1
         local function Learn()
             if duel and duel.id == id and duel.opp.acct == from then
@@ -3795,7 +3834,7 @@ local function BuildOverviewTab(page, width)
           tip = "Three new challenges every day - easy, medium and hard - for extra XP. See the Challenges tab." },
         { label = "Crowns won", get = function() return Fmt(acct.crowns or 0) end,
           tip = "Hours you finished with the most jumps of everyone you can see." },
-        { label = "Characters", get = function() return tostring(CountKeys(JumpCounterDB.chars)) end },
+        { label = "Characters", get = function() return tostring(#MyCharacters()) end },
     })
     -- "This week" builds its tooltip when shown (the time left changes).
     Tip(numbersA[3], function()
@@ -3972,9 +4011,43 @@ local BOARD_COLUMNS = {
 
 -- Everyone on the board with every column's value, sorted by one of them.
 -- Players without a value for that column (older versions) go last.
-local function BuildTable(sort)
+-- filter (1.8.11): "guild" = only your guild, "friends" = only your friends
+-- (you are always there). view "guilds": one row per guild, its members
+-- added up.
+local function BuildTable(sort, filter, view)
     local wid = CurrentWeekId()
     local rows = {}
+    local myGuild = GetGuildInfo and Plain((GetGuildInfo("player"))) or nil
+    -- First names (lower case) on your friends list and of Battle.net
+    -- friends in the game, looked up once when needed.
+    local friendNames
+    local function IsFriend(key, data)
+        if data.friend then return true end
+        if not friendNames then
+            friendNames = {}
+            if C_FriendList and C_FriendList.GetNumFriends then
+                for i = 1, C_FriendList.GetNumFriends() do
+                    local info = C_FriendList.GetFriendInfoByIndex(i)
+                    if info and info.name then friendNames[FirstWord(info.name:match("^[^-]+") or info.name)] = true end
+                end
+            end
+            if BNGetNumFriends and C_BattleNet and C_BattleNet.GetFriendNumGameAccounts then
+                for i = 1, (BNGetNumFriends()) do
+                    for j = 1, (C_BattleNet.GetFriendNumGameAccounts(i) or 0) do
+                        local g = C_BattleNet.GetFriendGameAccountInfo(i, j)
+                        if g and g.characterName then friendNames[FirstWord(g.characterName)] = true end
+                    end
+                end
+            end
+        end
+        return friendNames[FirstWord(key:match("^[^-]+") or key)] or false
+    end
+    local function Shown(key, data)
+        if view == "guilds" or not filter or filter == "all" then return true end
+        if filter == "guild" then return myGuild ~= nil and data.guild == myGuild end
+        if filter == "friends" then return IsFriend(key, data) end
+        return true
+    end
     local function add(key, data, mine)
         table.insert(rows, { key = key, data = data, class = data.class, total = data.total or 0, mine = mine,
             all = data.total or 0, hour = HourCount(data),
@@ -3992,7 +4065,37 @@ local function BuildTable(sort)
             if not best or (data.seen or 0) > (best.data.seen or 0) then byName[name] = { key = key, data = data } end
         end
     end
-    for _, e in pairs(byName) do add(e.key, e.data) end
+    for _, e in pairs(byName) do
+        if Shown(e.key, e.data) then add(e.key, e.data) end
+    end
+    if view == "guilds" then
+        -- One row per guild: its members' numbers added up.
+        local guilds, list = {}, {}
+        for _, r in ipairs(rows) do
+            local name = r.data.guild
+            if name and name ~= "" then
+                local g = guilds[name]
+                if not g then
+                    g = { key = "guild:" .. name, guild = name, isGuild = true, data = {}, members = {},
+                        total = 0, all = 0, hour = 0, level = 0, deaths = 0, wins = 0, best = 0 }
+                    guilds[name] = g
+                    table.insert(list, g)
+                end
+                g.all, g.total = g.all + r.all, g.total + r.all
+                g.hour = g.hour + (r.hour or 0)
+                g.level = g.level + (r.level or 0)
+                g.deaths = g.deaths + (r.deaths or 0)
+                g.wins = g.wins + (r.wins or 0)
+                g.best = math.max(g.best, r.best or 0)
+                g.mine = g.mine or r.mine
+                table.insert(g.members, r)
+            end
+        end
+        for _, g in ipairs(list) do
+            table.sort(g.members, function(a, b) return a.all > b.all end)
+        end
+        rows = list
+    end
     table.sort(rows, function(a, b)
         local x, y = a[sort], b[sort]
         if x ~= nil and y ~= nil and x ~= y then return x > y end
@@ -4012,8 +4115,54 @@ local function BuildLeaderboardTab(page, width)
     local ROW_H = 18
     local ROWS = BOARD_ROWS
     local HEAD_H = 22
-    local listTop = -HEAD_H - 4
+    local TOP = -26                       -- room for the filter buttons above the headers (1.8.11)
+    local listTop = TOP - HEAD_H - 4
     local listHeight = ROWS * ROW_H
+
+    -- Who's shown: everyone, your guild or your friends - or the guilds
+    -- themselves, ranked by their members' jumps added up.
+    local filterButtons = {}
+    local function FilterButton(id, label, anchor, x, tip)
+        local b = CreateFrame("Button", nil, page)
+        b:SetSize(96, 20)
+        b:SetPoint(anchor, x, 0)
+        b.bg = b:CreateTexture(nil, "BACKGROUND")
+        b.bg:SetAllPoints()
+        local hl = b:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 0.82, 0, 0.15)
+        b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        b.text:SetPoint("CENTER")
+        b.text:SetText(label)
+        b:SetScript("OnClick", function()
+            local ui = JumpCounterDB.ui
+            if id == "guilds" then
+                ui.boardView = (ui.boardView == "guilds") and "players" or "guilds"
+            else
+                ui.boardFilter, ui.boardView = id, "players"
+            end
+            page.scrollOffsetReset = true
+            page:Refresh()
+            if SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON then
+                PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+            end
+        end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(label)
+            GameTooltip:AddLine(tip, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", GameTooltip_Hide)
+        b.id = id
+        table.insert(filterButtons, b)
+    end
+    FilterButton("all", "Everyone", "TOPLEFT", 0, "Everyone you can see: your guild, your friends and the people they know.")
+    FilterButton("guild", "My guild", "TOPLEFT", 100, "Only players in your guild.")
+    FilterButton("friends", "Friends", "TOPLEFT", 200,
+        "Only players on your friends list or your Battle.net friends.")
+    FilterButton("guilds", "Guild ranking", "TOPRIGHT", -24,
+        "The guilds themselves: every guild's jumps added up (of its members with the addon that you can see).")
 
     -- Column headers (clickable for sorting).
     local headers = {}
@@ -4021,7 +4170,7 @@ local function BuildLeaderboardTab(page, width)
     for i, col in ipairs(BOARD_COLUMNS) do
         local h = CreateFrame("Button", nil, page)
         h:SetSize(col.width - 2, HEAD_H)
-        h:SetPoint("TOPLEFT", x, 0)
+        h:SetPoint("TOPLEFT", x, TOP)
         -- A bronze plate with a light top edge and a dark bottom edge, like
         -- the column buttons of the Who and Guild lists.
         local bg = h:CreateTexture(nil, "BACKGROUND")
@@ -4110,7 +4259,25 @@ local function BuildLeaderboardTab(page, width)
         row.medal:SetPoint("TOPRIGHT", page, "TOPLEFT", BOARD_COLUMNS[1].width - 3, y + 3)
         row.medal:Hide()
         row.hover:SetScript("OnEnter", function(self)
-            if row.entry then ShowEntryTooltip(self, row.entry) end
+            local e = row.entry
+            if e and e.isGuild then
+                -- A guild: its members, most jumps first.
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(e.guild)
+                GameTooltip:AddLine(("%d %s with the addon"):format(#e.members,
+                    #e.members == 1 and "player" or "players"), 1, 1, 1)
+                GameTooltip:AddLine(" ")
+                for i, m in ipairs(e.members) do
+                    if i > 15 then
+                        GameTooltip:AddLine(("...and %d more"):format(#e.members - 15), 0.6, 0.6, 0.6)
+                        break
+                    end
+                    GameTooltip:AddDoubleLine(ColoredName(m.key, m.class), Fmt(m.all), 1, 1, 1, 1, 1, 1)
+                end
+                GameTooltip:Show()
+            elseif e then
+                ShowEntryTooltip(self, e)
+            end
         end)
         row.hover:SetScript("OnLeave", GameTooltip_Hide)
 
@@ -4123,7 +4290,7 @@ local function BuildLeaderboardTab(page, width)
                 return
             end
             local data = entry.data or {}
-            if entry.key == playerKey then
+            if entry.mine then
                 row.bg:SetColorTexture(1, 0.82, 0, 0.14)
             else
                 row.bg:SetColorTexture(1, 1, 1, stripe and 0.04 or 0)
@@ -4149,6 +4316,21 @@ local function BuildLeaderboardTab(page, width)
                 c[1]:SetShadowOffset(1, -1)
                 local medal = pos and ({ "|cffffd100", "|cffd0d8e6", "|cffe0915a" })[pos]
                 c[1]:SetText(pos and (medal and (medal .. pos .. ".|r") or GRAY:format(pos .. ".")) or "")
+            end
+            if entry.isGuild then
+                -- A guild's row: name, players, its top jumper, and the sums.
+                local top = entry.members[1]
+                c[2]:SetText("|cffffd100" .. entry.guild .. "|r")
+                c[3]:SetText("|cffc8c8c8" .. #entry.members .. "|r")
+                c[4]:SetText(top and ColoredName(top.key, top.class) or "")
+                c[5]:SetText(num(entry.all, "all"))
+                c[6]:SetText(num(entry.hour, "hour"))
+                c[7]:SetText(GRAY:format("-"))
+                c[8]:SetText(num(entry.deaths, "deaths"))
+                c[9]:SetText(GRAY:format("-"))
+                c[10]:SetText(num(entry.wins, "wins"))
+                c[11]:SetText(entry.best > 0 and num(entry.best, "best") or GRAY:format("-"))
+                return
             end
             c[2]:SetText(FactionIcon(data.faction)
                 .. (entry.key == crownKey and CROWN_ICON or "") .. ColoredName(entry.key, entry.class))
@@ -4232,24 +4414,40 @@ local function BuildLeaderboardTab(page, width)
         for _, col in ipairs(BOARD_COLUMNS) do if col.sort == mode then valid = true end end
         if not valid then mode = "hour" end
         self.mode = mode
-        for _, h in ipairs(headers) do
+        local ui = JumpCounterDB.ui
+        local view = ui.boardView == "guilds" and "guilds" or "players"
+        local filter = ui.boardFilter or "all"
+        local guildLabels = { [2] = "Guild", [3] = "Players", [4] = "Top jumper" }
+        for i, h in ipairs(headers) do
             local on = h.col.sort == mode
             h.line:SetShown(on)
             h.text:SetTextColor(1, on and 1 or 0.82, on and 1 or 0)
+            h.text:SetText(view == "guilds" and guildLabels[i] or h.col.label)
+        end
+        for _, b in ipairs(filterButtons) do
+            local on = (b.id == "guilds" and view == "guilds") or (view ~= "guilds" and b.id == filter)
+            b.bg:SetColorTexture(on and 0.45 or 0.30, on and 0.35 or 0.23, on and 0.14 or 0.11, on and 1 or 0.6)
+            b.text:SetTextColor(1, on and 1 or 0.82, on and 1 or 0)
         end
         if self.scrollOffsetReset then
             self.scrollOffsetReset = nil
             FauxScrollFrame_SetOffset(scroll, 0)
             if bar then bar:SetValue(0) end
         end
-        self.list = BuildTable(mode)
+        self.list = BuildTable(mode, filter, view)
         self.myPos, self.myEntry = nil, nil
         for i, entry in ipairs(self.list) do
-            if entry.key == playerKey then self.myPos, self.myEntry = i, entry break end
+            if entry.mine then self.myPos, self.myEntry = i, entry break end
         end
         self:Update()
 
-        local count = #self.list .. (#self.list == 1 and " player" or " players")
+        local count
+        if view == "guilds" then
+            count = #self.list .. (#self.list == 1 and " guild" or " guilds")
+        else
+            count = #self.list .. (#self.list == 1 and " player" or " players")
+                .. (filter == "guild" and " in your guild" or (filter == "friends" and " among your friends" or ""))
+        end
         local note = ({
             hour = ("crown to the most jumps this hour - %d min left"):format(
                 math.ceil((3600 - GetServerTime() % 3600) / 60)),
@@ -4272,7 +4470,8 @@ local function BuildLeaderboardTab(page, width)
             local other = self.list[self.myPos > 1 and self.myPos - 1 or 2]
             local theirs = other and other[mode]
             if theirs then
-                local name = ColoredName(other.key, other.class)
+                local name = other.isGuild and ("|cffffd100" .. other.guild .. "|r")
+                    or ColoredName(other.key, other.class)
                 if self.myPos > 1 then
                     gap = theirs > mine and ("%s %s behind %s"):format(Fmt(theirs - mine), unit, name)
                         or ("level with %s"):format(name)
@@ -4609,8 +4808,8 @@ local function BuildSettingsTab(page, width)
     end
 
     Section("On screen")
-    AddCheck("Show minimap button", "The JumpingCounter button on the edge of the minimap. "
-        .. "Click it to open JumpingCounter, right-click for settings, drag to move it.",
+    AddCheck("Show minimap button", "The Jumps button on the edge of the minimap. "
+        .. "Click it to open Jumps, right-click for settings, drag to move it.",
         function() return settings.minimapButton end, SetMinimapShown)
     AddCheck("Show jump counter on screen", "The small movable window with your total.",
         function() return JumpCounterDB.ui.shown end, SetCounterShown)
@@ -4705,7 +4904,7 @@ local function CreateMainFrame()
     end
 
     -- Title.
-    local title = "JumpingCounter"
+    local title = "Jumps"
     if Part(f, "TitleText") then
         f.TitleText:SetText(title)
     elseif Part(Part(f, "TitleContainer"), "TitleText") then
@@ -4903,23 +5102,23 @@ local function OpenOptions() ToggleMain("settings") end
 -- Esc > Options > AddOns > JumpCounter: just points to the main window.
 local function CreateOptionsPanel()
     local panel = CreateFrame("Frame")
-    panel.name = "JumpingCounter"
+    panel.name = "Jumps"
 
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("JumpingCounter " .. GRAY:format("v" .. VERSION))
+    title:SetText("Jumps " .. GRAY:format("v" .. VERSION))
 
     local text = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     text:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
     text:SetWidth(520)
     text:SetJustifyH("LEFT")
     text:SetText("Everything - your stats, the leaderboard, challenges and settings - is in the "
-        .. "JumpingCounter window. Open it with /jumps or from the addon menu next to the minimap.")
+        .. "Jumps window. Open it with /jumps or from the addon menu next to the minimap.")
 
     local open = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     open:SetSize(180, 26)
     open:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -14)
-    open:SetText("Open JumpingCounter")
+    open:SetText("Open Jumps")
     open:SetScript("OnClick", function()
         if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
         if InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() then HideUIPanel(InterfaceOptionsFrame) end
@@ -4976,6 +5175,58 @@ SlashCmdList.JUMPCOUNTER = function(input)
         ToggleMain("challenges")
     elseif cmd == "board" or cmd == "lb" then
         ToggleMain("board")
+    elseif cmd == "forget" then
+        -- /jumps forget <name> (1.8.11): hide one of your characters - deleted,
+        -- or just not worth listing - from your character list, here and for
+        -- friends. Its jumps stay in your total and its data is kept; logging
+        -- in on it shows it again.
+        local want = ((input or ""):match("^%s*%S+%s+(.-)%s*$") or ""):lower()
+        local mine = {}
+        for key, c in pairs(JumpCounterDB.chars) do
+            local full = c.display or c.name or key:match("^[^-]+") or key
+            table.insert(mine, { key = key, c = c, full = full })
+        end
+        table.sort(mine, function(a, b) return (a.c.total or 0) > (b.c.total or 0) end)
+        local function List()
+            for _, m in ipairs(mine) do
+                Print(("  %s - %s jumps%s%s"):format(m.full, BreakUpLargeNumbers(m.c.total or 0),
+                    m.c == charData and " |cff999999(you're on it)|r" or "",
+                    m.c.hidden and " |cff999999(forgotten)|r" or ""))
+            end
+        end
+        if want == "" then
+            Print("/jumps forget <name> hides one of your characters (one you've deleted, say) from your "
+                .. "character list - for friends too. Its jumps stay in your total; logging in on it shows it again. "
+                .. "Your characters:")
+            List()
+            return
+        end
+        -- The full name, or the first name if only one character has it.
+        local found, matches = nil, 0
+        for _, m in ipairs(mine) do
+            if m.full:lower() == want then found, matches = m, 1 break end
+        end
+        if not found then
+            for _, m in ipairs(mine) do
+                if FirstWord(m.full) == want then found, matches = m, matches + 1 end
+            end
+        end
+        if matches ~= 1 then
+            Print(((matches == 0 and "None of your characters is called \"%s\"." or
+                "More than one of your characters is called \"%s\" - use the full name.") .. " Your characters:")
+                :format(want))
+            List()
+        elseif found.c == charData then          -- (saved by GUID, not by name)
+            Print("That's the character you're playing - log in on another one to forget this one.")
+        elseif found.c.hidden then
+            Print(("%s is already forgotten. Log in on it to show it again."):format(found.full))
+        else
+            found.c.hidden = true
+            dirty = true
+            RefreshBoardSoon()
+            Print(("%s is no longer listed among your characters. Its %s jumps still count in your total. "
+                .. "Log in on it to show it again."):format(found.full, BreakUpLargeNumbers(found.c.total or 0)))
+        end
     elseif cmd == "name" then
         -- /jumps name Zivv Pewpew  - set this character's full name by hand.
         local full = (input or ""):match("^%s*%S+%s+(.-)%s*$")
@@ -5029,7 +5280,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
             end
             Print("Name sources: " .. table.concat(names, ", ") .. " - saved: " .. tostring(charData.display)
                 .. (charData.nameSetByHand and " (set by hand)" or ""))
-            Print(("Friends confirmed using JumpingCounter: whisper=%d, Battle.net=%d. Queued messages: %d")
+            Print(("Friends confirmed using Jumps: whisper=%d, Battle.net=%d. Queued messages: %d")
                 :format(nWhisper, nBNet, QueuedCount()))
         end
     elseif cmd == "version" then
@@ -5063,7 +5314,7 @@ SlashCmdList.JUMPCOUNTER = function(input)
             .. " (this week: " .. MyWeekCount(me) .. ", this session: " .. sessionJumps .. ")"
             .. (title and (" - " .. title) or "")
             .. " - Deaths: " .. BreakUpLargeNumbers(me.deaths))
-        Print("/jumps - open the JumpingCounter window (stats, leaderboard, challenges, settings)")
+        Print("/jumps - open the Jumps window (stats, leaderboard, challenges, settings)")
         Print("/jumps board | challenges | settings - open the window on that tab")
         Print("/jumps counter - show/hide the small on-screen counter")
         Print(("/jumps prestige - reset your jump level at level %d for a prestige star"):format(PRESTIGE_LEVEL))
@@ -5076,7 +5327,8 @@ SlashCmdList.JUMPCOUNTER = function(input)
         Print("/jumps clear - remove other players from your leaderboard")
         Print("/jumps version - your version and who is on an older one")
         Print("/jumps reset - reset this character's jump count (others on the account keep theirs)")
-        Print("Scores sync with your guild, group and online WoW friends.")
+        Print("/jumps forget <name> - stop listing one of your characters (a deleted one); its jumps still count")
+        Print("Scores sync with your guild, your WoW and Battle.net friends, and the people they know.")
     else
         Print("Unknown command - type /jumps help.")
     end
@@ -5093,7 +5345,7 @@ end
 
 function JumpCounter_OnAddonCompartmentEnter(_, frame)
     GameTooltip:SetOwner(frame, "ANCHOR_LEFT")
-    GameTooltip:AddDoubleLine("JumpingCounter", "v" .. VERSION, 1, 0.82, 0, 0.6, 0.6, 0.6)
+    GameTooltip:AddDoubleLine("Jumps", "v" .. VERSION, 1, 0.82, 0, 0.6, 0.6, 0.6)
     if charData then
         local me = Me()
         GameTooltip:AddLine("Deaths: " .. BreakUpLargeNumbers(me.deaths), 1, 1, 1)
@@ -5109,7 +5361,7 @@ function JumpCounter_OnAddonCompartmentEnter(_, frame)
             BreakUpLargeNumbers(into), BreakUpLargeNumbers(need)), 1, 0.82, 0)
         GameTooltip:AddLine(("Challenges: %d / %d"):format(CountCompleted(acct), #CHALLENGES), 1, 1, 1)
     end
-    GameTooltip:AddLine("Click: open JumpingCounter", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Click: open Jumps", 0.8, 0.8, 0.8)
     GameTooltip:AddLine("Right-click: settings", 0.8, 0.8, 0.8)
     GameTooltip:Show()
 end
@@ -5125,7 +5377,6 @@ local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("CHAT_MSG_ADDON")
 pcall(events.RegisterEvent, events, "BN_CHAT_MSG_ADDON")   -- may not exist on every client
-events:RegisterEvent("GROUP_ROSTER_UPDATE")
 events:RegisterEvent("PLAYER_DEAD")
 events:RegisterEvent("PLAYER_LEVEL_UP")
 events:SetScript("OnEvent", function(_, event, ...)
@@ -5204,7 +5455,7 @@ events:SetScript("OnEvent", function(_, event, ...)
                 if not before and JumpsPerHour(Me()) then dirty = true end
             end
         end)
-        -- Announce ourselves and ask friends/group for their scores shortly
+        -- Announce ourselves and ask friends for their scores shortly
         -- after login. Spread over a random delay so a guild logging in after
         -- a server restart doesn't all send at once.
         C_Timer.After(8 + math.random() * 6, function()
@@ -5223,8 +5474,5 @@ events:SetScript("OnEvent", function(_, event, ...)
         if charData then OnPlayerDead() end
     elseif event == "PLAYER_LEVEL_UP" then
         if charData then dirty = true end   -- share the new character level
-
-    elseif event == "GROUP_ROSTER_UPDATE" then
-        if charData then dirty = true end   -- share with new group members on next tick
     end
 end)

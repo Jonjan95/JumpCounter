@@ -3,3 +3,5 @@
 .github export-ignore
 
 *.tga binary
+README.md export-ignore
+docs export-ignore

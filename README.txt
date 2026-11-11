@@ -1,14 +1,13 @@
-JumpingCounter
-==============
+Jumps
+=====
 
 Counts your jumps and deaths, gives you jump levels, ranks and challenges,
 and puts you on a leaderboard with your friends.
 
 INSTALL
-  Easiest: install "JumpingCounter" with the CurseForge app (game version
-  Forever) from https://www.curseforge.com/wow/addons/jumpingcounter
-  - updates are then one click. Or by hand from
-  https://github.com/Jonjan95/JumpCounter/releases/latest :
+  Easiest: install "Jumps" with the CurseForge app (game version
+  Forever) from https://www.curseforge.com/wow/addons/jumps
+  - updates are then one click. Or by hand, with the file from that page:
   1. Unzip so you get a folder named "JumpCounter".
   2. Put it in:  World of Warcraft\_forever_\Interface\AddOns\
      (the .toc file must be at AddOns\JumpCounter\JumpCounter.toc,
@@ -23,7 +22,7 @@ OPEN IT
   character's jumps. Jumps from before a character had the addon aren't
   known, and a character's deaths are added the first time you log it in.
 
-  Type /jumps, click the JumpingCounter button on the minimap (drag it to
+  Type /jumps, click the Jumps button on the minimap (drag it to
   move it, hide it in Settings), or use the addon menu next to the minimap.
   Everything is in that one window. Your name, rank, jump level and XP bar
   are always at the top (a "Prestige!" button appears there at jump level
@@ -38,7 +37,9 @@ OPEN IT
                  score in a duel. It
                  opens sorted by this hour; click a column header to sort
                  by another (your choice is remembered), and
-                 hover a player for all their details. Your own row is
+                 hover a player for all their details. The buttons above
+                 it show everyone, only your guild or only your friends -
+                 or the guild ranking: every guild's jumps added up. Your own row is
                  always shown at the bottom, and the bottom line tells you
                  how far it is to the player above you.
     Challenges   this week's goal for everyone together, today's three
@@ -54,13 +55,15 @@ HOW SCORES SYNC
 
   Your score is shared automatically with anyone running the addon who is:
     - in your guild
-    - in your party or raid
     - on your in-game friends list and online
     - your Battle.net friend and online in WoW (works across factions!)
 
-  Friends also pass on the scores they know, so friends of friends show up
-  too - including the other faction through a Battle.net friend. Those rows
-  say "via friends" on hover. The faction icon is shown next to each name.
+  Friends also pass on the scores of the people they know first-hand (their
+  guild and their friends), so those show up too - including the other
+  faction through a Battle.net friend. Those rows say "via friends" on
+  hover. Scores are passed on only once, and players you only meet in a
+  dungeon, raid or battleground never show up - every guild and group of
+  friends has its own board. The faction icon is shown next to each name.
 
 CHAT MESSAGES (change them in the Settings tab)
     - your milestones: 100, 500 and every 1,000 jumps
@@ -138,7 +141,7 @@ JUMP RANKS
   in the window - the rest are up to you to discover.
 
 COMMANDS (/jumps or /jc)
-  /jumps             open the JumpingCounter window
+  /jumps             open the Jumps window
   /jumps board       open it on the leaderboard
   /jumps challenges  open it on challenges
   /jumps settings    open it on settings
@@ -154,4 +157,7 @@ COMMANDS (/jumps or /jc)
   /jumps duel        challenge a random player who is jumping right now
   /jumps clear       remove other players from your leaderboard
   /jumps reset       reset this character's jump count (others keep theirs)
+  /jumps forget <name>  stop listing one of your characters (one you've
+                     deleted) - for friends too. Its jumps still count in
+                     your total, and logging in on it lists it again.
   /jumps help        list commands

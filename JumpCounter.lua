@@ -2594,14 +2594,15 @@ do
     local PAIR_COOLDOWN = 1800        -- the same two players: once per 30 minutes
     local DUEL_CHANCE = 1 / 90        -- chance per minute to start one with a single opponent around
     local DUEL_ACTIVE = 300           -- opponents must have jumped in the last 5 min
-    -- 1.8.13: both need the duel jump cap (below); older versions count
-    -- early-landing jumps at full speed (52 in 30 s on a steep slope).
-    local DUEL_MIN_VERSION = "1.8.13"
+    local DUEL_MIN_VERSION = "1.7.0"   -- older versions would count 3 minutes
     -- In a duel, jumps count no faster than normal jumping on flat ground
     -- (one per DUEL_JUMP_TIME, with one jump of slack), wherever you stand:
     -- up a slope, on stairs, under a low roof or at the water surface a jump
     -- lands sooner. Outside duels those jumps all count as before.
+    -- Older versions don't cap their own count (52 in 30 s on a steep slope),
+    -- so a score we're told is cut to the most the cap allows (DuelMax).
     local DUEL_JUMP_TIME = 0.82
+    local function DuelMax(length) return math.floor((length or 30) / DUEL_JUMP_TIME) + 2 end
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
 
     local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, route, ... }
@@ -2693,12 +2694,6 @@ do
         if on(IsSwimming) then return "swim" end
         if PairLeft(now, oppAcct) > 0 then return "pair", PairLeft(now, oppAcct) end
         if CooldownLeft(now) > 0 then return "cooldown", CooldownLeft(now) end
-        -- 1.8.13: an invite from a version without the duel jump cap.
-        for _, data in pairs(JumpCounterDB.peers) do
-            if data.acct == oppAcct and data.version and IsNewerVersion(DUEL_MIN_VERSION, data.version) then
-                return "old"
-            end
-        end
     end
 
     local DECLINE_TEXT = {
@@ -2711,10 +2706,9 @@ do
         dead = "%s is dead.",
         cooldown = "%s just had a duel - they can duel again in %d min.",
         pair = "You and %s dueled recently - you can duel each other again in %d min.",
-        old = "%s needs a newer version of Jumps to duel.",
     }
     -- How long to skip someone after they declined (seconds) when picking.
-    local DECLINE_SKIP = { off = 1800, busy = 90, afk = 300, taxi = 180, vehicle = 180, swim = 60, dead = 120, old = 1800 }
+    local DECLINE_SKIP = { off = 1800, busy = 90, afk = 300, taxi = 180, vehicle = 180, swim = 60, dead = 120 }
 
     -- Players on 1.5.0+ who jumped recently and aren't in a duel.
     local function DuelCandidates(now)
@@ -2990,7 +2984,7 @@ do
         elseif tag == "DP" then
             if duel and duel.id == id and a1 == duel.opp.acct then
                 Learn()
-                duel.theirs = math.max(duel.theirs, tonumber(a2) or 0)
+                duel.theirs = math.min(math.max(duel.theirs, tonumber(a2) or 0), DuelMax(duel.finish - duel.start))
                 duel.heard = true
                 UpdateDuelFrame(now)
             end
@@ -2998,6 +2992,7 @@ do
             -- Final: a1 acct, a2 name, a3 class, a4 count
             local count = tonumber(a4)
             if not count or a1 == acct.id then return end
+            count = math.min(count, DuelMax(duel and duel.id == id and (duel.finish - duel.start) or DUEL_LENGTH))
             if duel and duel.id == id then
                 if a1 == duel.opp.acct then
                     duel.theirs, duel.oppFinal, duel.heard = count, true, true

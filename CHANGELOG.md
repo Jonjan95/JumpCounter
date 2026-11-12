@@ -6,6 +6,7 @@ after an update, type `/reload` in game (or restart the game when the notes say 
 ## [1.8.13] - Unreleased
 
 - **Fair duels everywhere:** in a duel, jumps now count no faster than normal jumping on flat ground - it no longer matters where you stand. (Some spots let you land early and score far more.) Outside duels nothing changes: every jump still counts, also up hills and stairs.
+- **No more draws when it's level:** a duel that ends on the same score goes to whoever got there first. (Both need this version; otherwise it's a draw as before.)
 - **"Best duel" starts over** for everyone, so the scores can be compared again. It shows for players on this version or newer.
 - Dueling someone on an older version still works; a score above what the new rule allows is cut down to it on your screen.
 - **Two challenges got reachable goals:** since only full jumps count, they asked for more jumps than you can fit in the time. Your best so far counts, so if you've already beaten the new goal, it completes when you log in.

@@ -2603,6 +2603,16 @@ do
     -- so a score we're told is cut to the most the cap allows (DuelMax).
     local DUEL_JUMP_TIME = 0.82
     local function DuelMax(length) return math.floor((length or 30) / DUEL_JUMP_TIME) + 2 end
+    -- 1.8.13: a tie goes to whoever reached that score first. Each player
+    -- sends when their last counted jump was (hundredths of a second after
+    -- the start, on the server's clock) with their final score. The server
+    -- clock only gives whole seconds, so we watch for the moment it ticks.
+    local duelClock = { sec = 0, at = 0 }
+    function duelClock.Now()
+        local s = GetServerTime()
+        if s ~= duelClock.sec then return s end
+        return s + math.min(GetTime() - duelClock.at, 0.99)
+    end
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
 
     local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, route, ... }
@@ -2796,6 +2806,12 @@ do
             if data.acct == d.opp.acct and data.duelPoints then theirPoints = data.duelPoints end
         end
         local result = (me > them and 1) or (me < them and 0) or 0.5
+        -- 1.8.13: a tie goes to whoever got there first (if both said when).
+        local first = ""
+        if result == 0.5 and me > 0 and d.oppFinal and d.lastAt and d.oppAt and d.lastAt ~= d.oppAt then
+            result = d.lastAt < d.oppAt and 1 or 0
+            first = result == 1 and " - you got there first" or " - they got there first"
+        end
         -- 1.8.7: best score in one duel, and wins in a row.
         acct.stats.bestDuel = math.max(acct.stats.bestDuel or 0, me)
         acct.winStreak = (result == 1) and (acct.winStreak or 0) + 1 or 0
@@ -2813,7 +2829,7 @@ do
             acct.duelWins = (acct.duelWins or 0) + 1
             acct.lossStreak = 0
             xp = DUEL_WIN_XP
-            text = ("You won the jump duel against %s, %d - %d! (+%d XP, %s)"):format(opp, me, them, xp, pts)
+            text = ("You won the jump duel against %s, %d - %d%s! (+%d XP, %s)"):format(opp, me, them, first, xp, pts)
             short = "|cff33ff33You won!|r"
         elseif result == 0 then
             acct.duelLosses = (acct.duelLosses or 0) + 1
@@ -2823,7 +2839,7 @@ do
             else
                 acct.lossStreak = (acct.lossStreak or 0) + 1
             end
-            text = ("%s won the jump duel, %d - %d. (+%d XP for playing, %s)"):format(opp, them, me, xp, pts)
+            text = ("%s won the jump duel, %d - %d%s. (+%d XP for playing, %s)"):format(opp, them, me, first, xp, pts)
             short = "Good fight!"
         else
             acct.duelDraws = (acct.duelDraws or 0) + 1
@@ -2865,7 +2881,7 @@ do
         elseif d and d.state == "on" then
             if now >= d.finish and not d.sentFinal then
                 d.sentFinal, d.doneAt = true, now
-                SendDuel("DF", d.id, acct.id, Clean(MyDuelName()), charData.class, d.mine)
+                SendDuel("DF", d.id, acct.id, Clean(MyDuelName()), charData.class, d.mine, d.lastAt or "")
             elseif now < d.finish and d.mine ~= (d.sentCount or 0) and GetTime() - (d.lastProgress or 0) >= 0.95 then
                 -- 1.8.3: about once a second (was every 5 s), and only to the
                 -- opponent, so it stays within the game's message limit.
@@ -2989,13 +3005,15 @@ do
                 UpdateDuelFrame(now)
             end
         elseif tag == "DF" then
-            -- Final: a1 acct, a2 name, a3 class, a4 count
+            -- Final: a1 acct, a2 name, a3 class, a4 count, a5 when they got there (1.8.13)
             local count = tonumber(a4)
             if not count or a1 == acct.id then return end
-            count = math.min(count, DuelMax(duel and duel.id == id and (duel.finish - duel.start) or DUEL_LENGTH))
+            local most = DuelMax(duel and duel.id == id and (duel.finish - duel.start) or DUEL_LENGTH)
+            local at = count <= most and tonumber(a5) or nil
+            count = math.min(count, most)
             if duel and duel.id == id then
                 if a1 == duel.opp.acct then
-                    duel.theirs, duel.oppFinal, duel.heard = count, true, true
+                    duel.theirs, duel.oppFinal, duel.heard, duel.oppAt = count, true, true, at
                 end
                 return
             end
@@ -3003,7 +3021,7 @@ do
             local r = duelResults[id] or { finish = now, players = {} }
             duelResults[id] = r
             if r.shown or r.players[a1] then return end
-            r.players[a1] = { name = a2, class = (a3 ~= "" and a3) or nil, count = count }
+            r.players[a1] = { name = a2, class = (a3 ~= "" and a3) or nil, count = count, at = at }
             local list = {}
             for _, p in pairs(r.players) do table.insert(list, p) end
             if #list == 2 then
@@ -3011,10 +3029,16 @@ do
                 if settings.duelNews then
                     table.sort(list, function(x, y) return x.count > y.count end)
                     local a, b = list[1], list[2]
-                    Print(("|cffffd100Jump duel:|r %s %s %s, %d - %d!"):format(
-                        ClassColored(a.name, a.class), a.count == b.count and "and" or "beat",
-                        ClassColored(b.name, b.class), a.count, b.count)
-                        .. (a.count == b.count and " It's a draw." or ""))
+                    -- A tie goes to whoever got there first (1.8.13).
+                    local draw, first = a.count == b.count, ""
+                    if draw and a.count > 0 and a.at and b.at and a.at ~= b.at then
+                        if b.at < a.at then a, b = b, a end
+                        draw, first = false, " - got there first"
+                    end
+                    Print(("|cffffd100Jump duel:|r %s %s %s, %d - %d%s!"):format(
+                        ClassColored(a.name, a.class), draw and "and" or "beat",
+                        ClassColored(b.name, b.class), a.count, b.count, first)
+                        .. (draw and " It's a draw." or ""))
                 end
             end
             StartDuelTicker()
@@ -3031,6 +3055,7 @@ do
                 if t >= (duel.capAt or 0) then
                     duel.capAt = math.max(duel.capAt or 0, t - DUEL_JUMP_TIME) + DUEL_JUMP_TIME
                     duel.mine = duel.mine + 1
+                    duel.lastAt = math.max(0, math.floor((duelClock.Now() - duel.start) * 100 + 0.5))
                     UpdateDuelFrame(now)
                 end
             end
@@ -3038,6 +3063,12 @@ do
     end
 
     function CreateDuelFrame()
+        -- Watches the server clock tick while a duel is on (see duelClock).
+        CreateFrame("Frame"):SetScript("OnUpdate", function()
+            if not duel then return end
+            local s = GetServerTime()
+            if s ~= duelClock.sec then duelClock.sec, duelClock.at = s, GetTime() end
+        end)
         local f = CreateFrame("Frame", "JumpCounterDuelFrame", UIParent, "BackdropTemplate")
         f:SetSize(250, 70)
         StyleBox(f, "Jump duel")

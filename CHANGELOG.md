@@ -3,7 +3,7 @@
 All changes to Jumps, newest first. The addon updates itself through the CurseForge app;
 after an update, type `/reload` in game (or restart the game when the notes say so).
 
-## [1.8.13] - Unreleased
+## [1.8.13] - 2026-11-12
 
 - **Fair duels everywhere:** in a duel, jumps now count no faster than normal jumping on flat ground - it no longer matters where you stand. (Some spots let you land early and score far more.) Outside duels nothing changes: every jump still counts, also up hills and stairs.
 - **No more draws when it's level:** a duel that ends on the same score goes to whoever got there first. (Both need this version; otherwise it's a draw as before.)

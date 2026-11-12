@@ -739,6 +739,11 @@ local function InitDB()
         end
         db.circles = 1
     end
+    -- 1.8.13: "Best duel" starts over (duel jumps are capped at normal jump
+    -- speed from this version), and only shows for players on it.
+    for _, data in pairs(db.peers) do
+        if data.duelBest and (not data.version or IsNewerVersion("1.8.13", data.version)) then data.duelBest = nil end
+    end
 
     local name = UnitName("player")
     playerKey = name .. "-" .. MyRealm()
@@ -1431,6 +1436,8 @@ do
         entry.hourId, entry.hour, entry.crowns = num(rHourId), num(rHour), num(rCrowns)   -- 1.8.0
         entry.prestigeSpent, entry.duelPoints = num(rSpent), num(rPoints)               -- 1.8.2
         entry.duelBest = num(rBest)                                                     -- 1.8.9
+        -- 1.8.13: best duels from before the duel jump cap don't compare.
+        if not rVersion or rVersion == "" or IsNewerVersion("1.8.13", rVersion) then entry.duelBest = nil end
         if rGuild and rGuild ~= "" then entry.guild = rGuild end                        -- 1.8.11
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
@@ -1582,6 +1589,8 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.prestigeSpent = tonumber(prestigeSpent)   -- these two are nil before 1.8.2
         entry.duelPoints = tonumber(duelPoints)
         entry.duelBest = tonumber(duelBest)       -- nil before 1.8.9
+        -- 1.8.13: best duels from before the duel jump cap don't compare.
+        if not version or version == "" or IsNewerVersion("1.8.13", version) then entry.duelBest = nil end
         -- 1.8.11: their guild ("" = none). Older versions don't say: someone
         -- heard on the guild channel is in ours.
         if guildName then
@@ -2585,7 +2594,14 @@ do
     local PAIR_COOLDOWN = 1800        -- the same two players: once per 30 minutes
     local DUEL_CHANCE = 1 / 90        -- chance per minute to start one with a single opponent around
     local DUEL_ACTIVE = 300           -- opponents must have jumped in the last 5 min
-    local DUEL_MIN_VERSION = "1.7.0"   -- older versions would count 3 minutes
+    -- 1.8.13: both need the duel jump cap (below); older versions count
+    -- early-landing jumps at full speed (52 in 30 s on a steep slope).
+    local DUEL_MIN_VERSION = "1.8.13"
+    -- In a duel, jumps count no faster than normal jumping on flat ground
+    -- (one per DUEL_JUMP_TIME, with one jump of slack), wherever you stand:
+    -- up a slope, on stairs, under a low roof or at the water surface a jump
+    -- lands sooner. Outside duels those jumps all count as before.
+    local DUEL_JUMP_TIME = 0.82
     local DUEL_WIN_XP, DUEL_PLAY_XP = 100, 25
 
     local duel                        -- our duel: { id, start, finish, state, opp, mine, theirs, route, ... }
@@ -2677,6 +2693,12 @@ do
         if on(IsSwimming) then return "swim" end
         if PairLeft(now, oppAcct) > 0 then return "pair", PairLeft(now, oppAcct) end
         if CooldownLeft(now) > 0 then return "cooldown", CooldownLeft(now) end
+        -- 1.8.13: an invite from a version without the duel jump cap.
+        for _, data in pairs(JumpCounterDB.peers) do
+            if data.acct == oppAcct and data.version and IsNewerVersion(DUEL_MIN_VERSION, data.version) then
+                return "old"
+            end
+        end
     end
 
     local DECLINE_TEXT = {
@@ -2689,9 +2711,10 @@ do
         dead = "%s is dead.",
         cooldown = "%s just had a duel - they can duel again in %d min.",
         pair = "You and %s dueled recently - you can duel each other again in %d min.",
+        old = "%s needs a newer version of Jumps to duel.",
     }
     -- How long to skip someone after they declined (seconds) when picking.
-    local DECLINE_SKIP = { off = 1800, busy = 90, afk = 300, taxi = 180, vehicle = 180, swim = 60, dead = 120 }
+    local DECLINE_SKIP = { off = 1800, busy = 90, afk = 300, taxi = 180, vehicle = 180, swim = 60, dead = 120, old = 1800 }
 
     -- Players on 1.5.0+ who jumped recently and aren't in a duel.
     local function DuelCandidates(now)
@@ -3008,8 +3031,13 @@ do
         if duel and duel.state == "on" then
             local now = GetServerTime()
             if now >= duel.start and now < duel.finish then
-                duel.mine = duel.mine + 1
-                UpdateDuelFrame(now)
+                -- No faster than normal jumping (see DUEL_JUMP_TIME).
+                local t = GetTime()
+                if t >= (duel.capAt or 0) then
+                    duel.capAt = math.max(duel.capAt or 0, t - DUEL_JUMP_TIME) + DUEL_JUMP_TIME
+                    duel.mine = duel.mine + 1
+                    UpdateDuelFrame(now)
+                end
             end
         end
     end
@@ -5422,6 +5450,13 @@ events:SetScript("OnEvent", function(_, event, ...)
         UpdateDerivedStats()
         Daily.CheckWeekly()               -- a weekly goal the others reached while we were away
         CheckChallenges()
+        -- 1.8.13: "Best duel" starts over, once (duel jumps are capped from
+        -- this version). After the check above, so a best that already beat
+        -- a challenge's goal still completes it.
+        if (acct.bestDuelFrom or 0) < 1 then
+            acct.stats.bestDuel, acct.bestDuelFrom = nil, 1
+            dirty = true
+        end
         JumpCounterDB.jumpTrace = nil      -- left over from a 1.8.5 test build
         hooksecurefunc("JumpOrAscendStart", OnJump)
         Print(("v%s loaded - type /jumps to open."):format(VERSION))

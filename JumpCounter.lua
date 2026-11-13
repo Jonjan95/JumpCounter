@@ -1884,6 +1884,11 @@ local function CreateCounterFrame()
     f.session = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     f.session:SetPoint("BOTTOM", 0, 9)
 
+    -- 1.8.14: the combo, above the box while it's running (see airPress.Combo).
+    f.combo = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    f.combo:SetPoint("BOTTOM", f, "TOP", 0, 3)
+    f.combo:Hide()
+
     f:SetScript("OnMouseUp", function(_, button)
         if button == "RightButton" then
             if boardFrame:IsShown() then boardFrame:Hide() else boardFrame:Show() end
@@ -3428,6 +3433,42 @@ local function OnJump()
     airPress.Count(false, now)
 end
 
+-- 1.8.14: the combo - counted jumps in a row with no more than comboGap
+-- seconds between them. From comboShow jumps it shows above the on-screen
+-- counter, in a brighter colour the longer it gets. The longest one is kept
+-- (stats.bestCombo); a new best of comboSay or more is said in chat when
+-- the combo ends.
+airPress.comboGap, airPress.comboShow, airPress.comboSay, airPress.combo = 2, 5, 25, 0
+function airPress.ComboEnd()
+    local n = airPress.combo
+    airPress.combo = 0
+    if counterFrame and counterFrame.combo then counterFrame.combo:Hide() end
+    if airPress.comboBest then
+        airPress.comboBest = nil
+        Print(("New best combo: |cffffffff%d|r jumps in a row!"):format(n))
+    end
+end
+function airPress.Combo(now)
+    if airPress.combo > 0 and now - airPress.comboAt > airPress.comboGap then airPress.ComboEnd() end
+    local n = airPress.combo + 1
+    airPress.combo, airPress.comboAt = n, now
+    if n > (acct.stats.bestCombo or 0) then
+        acct.stats.bestCombo = n
+        airPress.comboBest = n >= airPress.comboSay or nil
+    end
+    local text = counterFrame and counterFrame.combo
+    if text and n >= airPress.comboShow then
+        local color = n >= 250 and "ffff8000" or n >= 100 and "ffa335ee" or n >= 50 and "ff0070dd"
+            or n >= 25 and "ff1eff00" or "ffffffff"
+        text:SetText(("|c%sCombo x%d|r"):format(color, n))
+        text:Show()
+    end
+    C_Timer.After(airPress.comboGap + 0.05, function()
+        -- Still the last jump, so the combo is over.
+        if airPress.comboAt == now and airPress.combo > 0 then airPress.ComboEnd() end
+    end)
+end
+
 function airPress.Count(inWater, now)
     if not inWater then
         -- Too soon after the last counted jump to be a full jump.
@@ -3469,6 +3510,7 @@ function airPress.Count(inWater, now)
     if acct.hourId ~= hid then acct.hourId, acct.hour = hid, 0 end
     acct.hour = acct.hour + 1
     dirty = true
+    airPress.Combo(now)
     UpdateCounter()
     RefreshBoardSoon()
     CheckMyNotifications(Me().total)
@@ -3933,6 +3975,9 @@ local function BuildOverviewTab(page, width)
           tip = "Your most jumps in one hour (counted since version 1.8.7)." },
         { label = "Best session", get = function() return Fmt(acct.stats.bestSession or 0) end },
         { label = "Best week", get = function() return Fmt(acct.stats.bestWeek or 0) end },
+        { label = "Longest combo", get = function() return Fmt(acct.stats.bestCombo or 0) end,
+          tip = "Your most jumps in a row with no more than 2 seconds between them "
+              .. "(counted since version 1.8.14)." },
         { label = "Best day streak", get = function()
             local n = acct.stats.bestStreak or 0
             return n .. (n == 1 and " day" or " days") end },

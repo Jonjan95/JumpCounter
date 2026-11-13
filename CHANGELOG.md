@@ -7,6 +7,7 @@ after an update, type `/reload` in game (or restart the game when the notes say 
 
 - **Combo:** keep jumping and your combo grows - every jump within 2 seconds of the last one adds to it. It shows on the on-screen counter while it's running and changes colour the longer it gets. Your longest combo is on the Overview tab, and a new best is announced to you in chat.
 - **New "Combo" column on the leaderboard:** everyone's longest combo. It shows for players on this version or newer. The window is a little wider to fit it.
+- **More prestige stars to earn:** your star used to stop changing fairly early. Now it keeps getting a new look, further and further apart, long into the prestige grind. Nobody's current star changes. **Restart the game once** after this update to see the new stars (a `/reload` isn't enough for new images).
 - Two challenges had the same name; one of them has a new name now. Nothing else changes - if you'd done it, it stays done.
 
 ## [1.8.13] - 2026-11-12

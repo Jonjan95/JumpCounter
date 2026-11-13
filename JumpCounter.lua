@@ -351,9 +351,18 @@ end
 -- own images in Media\; a game that hasn't been restarted since the update
 -- that added them can't find them (see Media\Media.lua), and then every
 -- star is the old gold one (the star raid marker).
+-- 1.8.14: six more, further and further apart, so the star keeps changing
+-- deep into the prestige grind. Their images came later (Media\Media3.lua);
+-- without them the star stays the fourth one.
 -- Returns the tier's number and name.
 local function PrestigeTier(n)
     n = n or 0
+    if n >= 200 then return 10, "Celestial" end
+    if n >= 130 then return 9, "Diamond" end
+    if n >= 90 then return 8, "Ruby" end
+    if n >= 60 then return 7, "Amethyst" end
+    if n >= 40 then return 6, "Sapphire" end
+    if n >= 25 then return 5, "Emerald" end
     if n >= 15 then return 4, "Radiant" end
     if n >= 8 then return 3, "Gold" end
     if n >= 3 then return 2, "Silver" end
@@ -365,7 +374,9 @@ local function PrestigeIcon(n)
     if not JumpCounter_MediaLoaded then
         return "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t"
     end
-    return ("|TInterface\\AddOns\\JumpCounter\\Media\\tier%d:0|t"):format(math.max(1, (PrestigeTier(n))))
+    local tier = math.max(1, (PrestigeTier(n)))
+    if tier > 4 and not JumpCounter_Media3 then tier = 4 end
+    return ("|TInterface\\AddOns\\JumpCounter\\Media\\tier%d:0|t"):format(tier)
 end
 
 -- Tier star + number, or "" without prestige.

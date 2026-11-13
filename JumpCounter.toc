@@ -10,4 +10,5 @@
 ## AddonCompartmentFuncOnLeave: JumpCounter_OnAddonCompartmentLeave
 
 Media\Media.lua
+Media\Media3.lua
 JumpCounter.lua

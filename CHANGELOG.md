@@ -5,7 +5,8 @@ after an update, type `/reload` in game (or restart the game when the notes say 
 
 ## [1.8.14] - Unreleased
 
-- **Combo:** keep jumping and your combo grows - every jump within 2 seconds of the last one adds to it. It shows above the on-screen counter and changes colour the longer it gets. Your longest combo is on the Overview tab, and a new best is announced to you in chat.
+- **Combo:** keep jumping and your combo grows - every jump within 2 seconds of the last one adds to it. It shows on the on-screen counter while it's running and changes colour the longer it gets. Your longest combo is on the Overview tab, and a new best is announced to you in chat.
+- **New "Combo" column on the leaderboard:** everyone's longest combo. It shows for players on this version or newer. The window is a little wider to fit it.
 - Two challenges had the same name; one of them has a new name now. Nothing else changes - if you'd done it, it stays done.
 
 ## [1.8.13] - 2026-11-12

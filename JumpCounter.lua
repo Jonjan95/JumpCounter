@@ -887,6 +887,7 @@ local function Me()
         prestige = acct.prestige, prestigeSpent = acct.prestigeSpent, done = acct.done,
         duelWins = acct.duelWins or 0, duelPoints = acct.duelPoints or 0, faction = MyFaction(),
         duelBest = acct.stats and acct.stats.bestDuel or 0,
+        combo = acct.stats and acct.stats.bestCombo or 0,
         guild = GetGuildInfo and Plain((GetGuildInfo("player"))) or nil,
         hourId = acct.hourId, hour = acct.hour, crowns = acct.crowns or 0,
         class = charData.class, display = charData.display }
@@ -1131,7 +1132,12 @@ function ScoreMessage()
     -- ranking. Left out altogether in the rare case it doesn't fit (the
     -- receiver then falls back on the channel the score came through).
     local guild = (tostring(GetGuildInfo and Plain((GetGuildInfo("player"))) or ""):gsub(":", ""))
-    if #msg + 1 + #suffix + 1 + #guild <= MAX_MESSAGE then suffix = suffix .. ":" .. guild end
+    if #msg + 1 + #suffix + 1 + #guild <= MAX_MESSAGE then
+        suffix = suffix .. ":" .. guild
+        -- 1.8.14: longest combo, after the guild (so only when that fits).
+        local combo = ":" .. (acct.stats.bestCombo or 0)
+        if #msg + 1 + #suffix + #combo <= MAX_MESSAGE then suffix = suffix .. combo end
+    end
     -- Character list for the hover tooltip, as many as fit.
     local chars = {}
     local length = #msg + 1 + #suffix
@@ -1312,7 +1318,11 @@ do
         local msg = table.concat(parts, ":")
         -- 1.8.11: their guild, when there's room for it.
         local guild = NoColon(data.guild)
-        if #msg + 1 + #guild <= MAX_MESSAGE then msg = msg .. ":" .. guild end
+        if #msg + 1 + #guild <= MAX_MESSAGE then
+            msg = msg .. ":" .. guild
+            local combo = n(data.combo)                             -- 1.8.14, after the guild
+            if #msg + 1 + #combo <= MAX_MESSAGE then msg = msg .. ":" .. combo end
+        end
         return msg
     end
 
@@ -1391,7 +1401,7 @@ do
     function ApplyRelay(msg, via)
         local _, rAcct, rKey, rDisplay, rClass, rFaction, rTotal, rWeekId, rWeek, rDeaths, rLevel,
             rXP, rChallenges, rJph, rPrestige, rDuels, rVersion, rSeen, rHops, rLosses, rDraws,
-            rHourId, rHour, rCrowns, rSpent, rPoints, rBest, rGuild = strsplit(":", msg)
+            rHourId, rHour, rCrowns, rSpent, rPoints, rBest, rGuild, rCombo = strsplit(":", msg)
         rTotal, rSeen = tonumber(rTotal), tonumber(rSeen)
         if not rAcct or rAcct == "" or rAcct == acct.id or not rTotal or not rSeen
             or not rKey or rKey == "" then return end
@@ -1439,6 +1449,7 @@ do
         -- 1.8.13: best duels from before the duel jump cap don't compare.
         if not rVersion or rVersion == "" or IsNewerVersion("1.8.13", rVersion) then entry.duelBest = nil end
         if rGuild and rGuild ~= "" then entry.guild = rGuild end                        -- 1.8.11
+        entry.combo = num(rCombo) or entry.combo        -- 1.8.14 (older passers leave it out)
         entry.version = (rVersion ~= "" and rVersion) or entry.version
         entry.seen = rSeen
         entry.hops = RELAY_MAX_HOPS
@@ -1507,7 +1518,7 @@ local function HandleMessage(msg, key, display, reply, via)
     local tag, total, class, version, sentKey, sentDisplay, weekId, weekCount, guid, deaths,
         charLevel, xp, challenges, jph, prestige, acctId, characters, duelWins, faction,
         duelLosses, duelDraws, hourId, hourCount, crowns, prestigeSpent, duelPoints, duelBest,
-        guildName = strsplit(":", msg)
+        guildName, combo = strsplit(":", msg)
     if tag == "T" and tonumber(total) then
         total = tonumber(total)
         -- Newer clients tell us their key and full name directly.
@@ -1591,6 +1602,7 @@ local function HandleMessage(msg, key, display, reply, via)
         entry.duelBest = tonumber(duelBest)       -- nil before 1.8.9
         -- 1.8.13: best duels from before the duel jump cap don't compare.
         if not version or version == "" or IsNewerVersion("1.8.13", version) then entry.duelBest = nil end
+        entry.combo = tonumber(combo)             -- longest combo, nil before 1.8.14
         -- 1.8.11: their guild ("" = none). Older versions don't say: someone
         -- heard on the guild channel is in ours.
         if guildName then
@@ -1884,9 +1896,10 @@ local function CreateCounterFrame()
     f.session = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     f.session:SetPoint("BOTTOM", 0, 9)
 
-    -- 1.8.14: the combo, above the box while it's running (see airPress.Combo).
-    f.combo = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    f.combo:SetPoint("BOTTOM", f, "TOP", 0, 3)
+    -- 1.8.14: the combo, in place of the week / session line while it's
+    -- running (see airPress.Combo).
+    f.combo = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.combo:SetPoint("BOTTOM", 0, 9)
     f.combo:Hide()
 
     f:SetScript("OnMouseUp", function(_, button)
@@ -3434,7 +3447,7 @@ local function OnJump()
 end
 
 -- 1.8.14: the combo - counted jumps in a row with no more than comboGap
--- seconds between them. From comboShow jumps it shows above the on-screen
+-- seconds between them. From comboShow jumps it shows on the on-screen
 -- counter, in a brighter colour the longer it gets. The longest one is kept
 -- (stats.bestCombo); a new best of comboSay or more is said in chat when
 -- the combo ends.
@@ -3442,7 +3455,10 @@ airPress.comboGap, airPress.comboShow, airPress.comboSay, airPress.combo = 2, 5,
 function airPress.ComboEnd()
     local n = airPress.combo
     airPress.combo = 0
-    if counterFrame and counterFrame.combo then counterFrame.combo:Hide() end
+    if counterFrame and counterFrame.combo then
+        counterFrame.combo:Hide()
+        counterFrame.session:Show()
+    end
     if airPress.comboBest then
         airPress.comboBest = nil
         Print(("New best combo: |cffffffff%d|r jumps in a row!"):format(n))
@@ -3462,6 +3478,7 @@ function airPress.Combo(now)
             or n >= 25 and "ff1eff00" or "ffffffff"
         text:SetText(("|c%sCombo x%d|r"):format(color, n))
         text:Show()
+        counterFrame.session:Hide()
     end
     C_Timer.After(airPress.comboGap + 0.05, function()
         -- Still the last jump, so the combo is over.
@@ -3701,6 +3718,8 @@ local function ShowEntryTooltip(owner, entry)
     if wins then line("Duels won", tostring(wins)) end
     local best = isMe and (acct.stats.bestDuel or 0) or data.duelBest
     if best and best > 0 then line("Best duel", best .. " jumps") end   -- 1.8.9+
+    local combo = isMe and (acct.stats.bestCombo or 0) or data.combo
+    if combo and combo > 0 then line("Longest combo", combo .. " jumps") end   -- 1.8.14+
 
     -- Characters on the account (from 1.1.0; older versions count one character).
     local chars
@@ -4107,6 +4126,9 @@ local BOARD_COLUMNS = {
     { label = "Wins",       width = 46,  justify = "RIGHT", sort = "wins", tip = "Jump duels won." },
     { label = "Best duel",  width = 64,  justify = "RIGHT", sort = "best",
       tip = "Most jumps in a single jump duel (counted since version 1.8.7; shown for players on 1.8.9 or newer)." },
+    { label = "Combo",      width = 56,  justify = "RIGHT", sort = "combo",
+      tip = "Longest combo: most jumps in a row with no more than 2 seconds between them "
+          .. "(shown for players on 1.8.14 or newer)." },
 }
 
 -- Everyone on the board with every column's value, sorted by one of them.
@@ -4154,7 +4176,7 @@ local function BuildTable(sort, filter, view)
             week = (wid and data.weekId == wid) and (data.week or 0) or 0,
             rate = JumpsPerHour(data), level = EntryXP(data), deaths = data.deaths,
             duels = data.duelPoints, duelWins = data.duelWins, wins = data.duelWins,
-            best = data.duelBest })
+            best = data.duelBest, combo = data.combo })
     end
     add(playerKey, Me(), true)
     local byName = {}
@@ -4177,7 +4199,7 @@ local function BuildTable(sort, filter, view)
                 local g = guilds[name]
                 if not g then
                     g = { key = "guild:" .. name, guild = name, isGuild = true, data = {}, members = {},
-                        total = 0, all = 0, hour = 0, level = 0, deaths = 0, wins = 0, best = 0 }
+                        total = 0, all = 0, hour = 0, level = 0, deaths = 0, wins = 0, best = 0, combo = 0 }
                     guilds[name] = g
                     table.insert(list, g)
                 end
@@ -4187,6 +4209,7 @@ local function BuildTable(sort, filter, view)
                 g.deaths = g.deaths + (r.deaths or 0)
                 g.wins = g.wins + (r.wins or 0)
                 g.best = math.max(g.best, r.best or 0)
+                g.combo = math.max(g.combo, r.combo or 0)
                 g.mine = g.mine or r.mine
                 table.insert(g.members, r)
             end
@@ -4430,6 +4453,7 @@ local function BuildLeaderboardTab(page, width)
                 c[9]:SetText(GRAY:format("-"))
                 c[10]:SetText(num(entry.wins, "wins"))
                 c[11]:SetText(entry.best > 0 and num(entry.best, "best") or GRAY:format("-"))
+                c[12]:SetText(entry.combo > 0 and num(entry.combo, "combo") or GRAY:format("-"))
                 return
             end
             c[2]:SetText(FactionIcon(data.faction)
@@ -4451,6 +4475,7 @@ local function BuildLeaderboardTab(page, width)
             end
             c[10]:SetText(entry.wins and num(entry.wins, "wins") or GRAY:format("-"))
             c[11]:SetText(entry.best and num(entry.best, "best") or GRAY:format("-"))
+            c[12]:SetText(entry.combo and num(entry.combo, "combo") or GRAY:format("-"))
         end
         return row
     end
@@ -4558,6 +4583,7 @@ local function BuildLeaderboardTab(page, width)
             duels = "duel points: win them from your opponent - more against stronger players",
             wins = "jump duels won",
             best = "most jumps in a single jump duel",
+            combo = "longest combo: jumps in a row, no more than 2 seconds apart",
         })[mode] or "click a column to sort - hover a player for details"
         self.footer:SetText(count .. "  -  " .. note)
 
@@ -4970,7 +4996,7 @@ local TABS = {
 }
 
 local function CreateMainFrame()
-    local W, H = 860, 520
+    local W, H = 916, 520             -- 1.8.14: 56 wider, for the Combo column
     local f
     if HasTemplate("ButtonFrameTemplate") then
         f = CreateFrame("Frame", "JumpCounterMain", UIParent, "ButtonFrameTemplate")

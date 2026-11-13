@@ -535,7 +535,7 @@ local CHALLENGES = {
       desc = "Win the crown 50 times.",                       progress = function() return acct.crowns or 0 end },
 
     -- 1.8.2: daily challenges.
-    { id = "daily1",   name = "Daily Hopper",      xp = 250,  goal = 10,
+    { id = "daily1",   name = "Daily Routine",     xp = 250,  goal = 10,
       desc = "Complete 10 daily challenges.",                 progress = function() return acct.dailyDone or 0 end },
     { id = "daily2",   name = "Creature of Habit", xp = 1500, goal = 100,
       desc = "Complete 100 daily challenges.",                progress = function() return acct.dailyDone or 0 end },

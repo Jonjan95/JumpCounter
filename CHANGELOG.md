@@ -3,7 +3,7 @@
 All changes to Jumps, newest first. The addon updates itself through the CurseForge app;
 after an update, type `/reload` in game (or restart the game when the notes say so).
 
-## [1.8.14] - Unreleased
+## [1.8.14] - 2026-11-13
 
 - **Combo:** keep jumping and your combo grows - every jump within 2 seconds of the last one adds to it. It shows on the on-screen counter while it's running and changes colour the longer it gets. Your longest combo is on the Overview tab, and a new best is announced to you in chat.
 - **New "Combo" column on the leaderboard:** everyone's longest combo. It shows for players on this version or newer. The window is a little wider to fit it.

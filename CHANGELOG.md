@@ -3,7 +3,7 @@
 All changes to Jumps, newest first. The addon updates itself through the CurseForge app;
 after an update, type `/reload` in game (or restart the game when the notes say so).
 
-## [1.8.15] - Unreleased
+## [1.8.15] - 2026-11-14
 
 - **Special jumps:** the on-screen counter now notices when you land a jump in a special way and calls it out next to your combo. The Overview tab keeps count. (Most can't be seen inside dungeons, raids and battlegrounds.)
 - **8 new challenges** for combos and special jumps - there are now 108 to find.

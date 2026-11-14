@@ -3585,23 +3585,33 @@ function airPress.TrickLand(air)
     local turned = math.abs(t.turned or 0)
     local full = 2 * math.pi * t.circle
     if turned >= 2 * full then got.spin2 = true elseif turned >= full then got.spin = true end
-    local along, dist
+    local along, dist, dn, dw
     local north, west = airPress.TrickWhere()
-    if t.from and t.north and north and turned < math.pi / 2 then
-        local dn, dw = north - t.north, west - t.west
+    if t.north and north then
+        dn, dw = north - t.north, west - t.west
         dist = math.sqrt(dn * dn + dw * dw)
-        if dist >= t.travel then
-            -- Facing 0 is north and grows towards the west.
+        if t.from and dist >= t.travel then
+            -- Facing 0 is north and grows towards the west. 1 = straight
+            -- ahead, 0 = straight to the side, -1 = straight back.
             along = (dn * math.cos(t.from) + dw * math.sin(t.from)) / dist
-            if along <= -0.75 then got.back = true elseif math.abs(along) <= 0.35 then got.side = true end
+            if turned < math.pi / 2 then
+                if along <= -0.5 then got.back = true elseif along < 0.5 then got.side = true end
+            end
         end
     end
     if air >= t.bigAir and air < 120 then got.air = true end
     if debugMode then
-        Print(("debug: trick check - turned %d deg, travelled %s yd, along facing %s, %.2f s in the air%s%s"):format(
+        local list
+        for _, kind in ipairs(t.order) do
+            if got[kind] then list = (list and (list .. " + ") or "") .. t.names[kind] end
+        end
+        Print(("debug: trick check - turned %d deg, travelled %s yd, along facing %s, %.2f s in the air%s%s"
+            .. " [facing %s deg, north %s, west %s] -> %s"):format(
             math.floor(math.deg(turned) + 0.5), dist and ("%.1f"):format(dist) or "?",
             along and ("%.2f"):format(along) or "?", air,
-            t.from and "" or " (the game gave no facing)", (t.north and north) and "" or " (no position)"))
+            t.from and "" or " (the game gave no facing)", (t.north and north) and "" or " (no position)",
+            t.from and ("%d"):format(math.deg(t.from)) or "?", dn and ("%+.1f"):format(dn) or "?",
+            dw and ("%+.1f"):format(dw) or "?", list or "no trick"))
     end
     t.from, t.north = nil, nil
     local st = acct.stats

@@ -5868,7 +5868,10 @@ events:SetScript("OnEvent", function(_, event, ...)
             C_Timer.After(45, DropGroupStrangers)
         end
 
-        JumpCounterDB.debugLogging = nil       -- /jumps debug is off again after a /reload
+        -- /jumps debug is off again after a /reload. Its saved log is dropped
+        -- here: it was written to disk at the /reload, so it could be read
+        -- then, and the next save leaves it out.
+        JumpCounterDB.debugLogging, JumpCounterDB.debugLog = nil, nil
         CreateDuelFrame()
         C_Timer.NewTicker(60, MaybeStartRandomDuel)
         C_Timer.NewTicker(5, CrownTick)

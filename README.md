@@ -12,6 +12,7 @@ It works by itself from the moment you install it. Everyone in your guild or on 
 - **A leaderboard** with your guild, your friends, your Battle.net friends (also on the other faction) and the people they know. Sort it by total jumps, this hour, average per hour, duel rank and more. Show everyone, only your guild or only your friends.
 - **A guild ranking:** the jumps of each guild on your leaderboard added up.
 - **Jump levels and prestige:** every jump is XP. Reach jump level 100 and you can prestige for a star - and the star changes look as you collect more.
+- **Combos:** keep jumping without a break and your combo grows on the counter - your longest is on the leaderboard. Land a jump in a special way and the counter calls it out too.
 - **Jump ranks:** your all-time jumps earn you titles. Only your next one is shown; the rest are yours to discover.
 - **Over 100 challenges** to find, from the obvious to the odd, plus **three daily challenges** that are the same for everyone - race your friends.
 - **A weekly goal for everyone together:** your whole leaderboard's jumps that week count towards three shared goals.

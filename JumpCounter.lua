@@ -3406,6 +3406,15 @@ groundTracker:SetScript("OnUpdate", function()
     end
     local now = GetTime()
     local wet = wasSwimming or Plain(IsSubmerged and IsSubmerged())
+    -- 1.8.15: the combo ends after comboGap seconds without a jump, and a
+    -- trick's name leaves the counter after a moment. Checked here rather
+    -- than with a new timer on every jump.
+    if airPress.combo > 0 and now - airPress.comboAt > airPress.comboGap then airPress.ComboEnd() end
+    local tricks = airPress.tricks
+    if tricks.text and now - tricks.at >= tricks.show then
+        tricks.text = nil
+        airPress.Line()
+    end
     -- 1.8.7: how long a jump on land kept you in the air (jump off something
     -- high). Landing dead doesn't count; flying or a flight path cancels it.
     if airPress.jumpAt and falling then
@@ -3572,6 +3581,7 @@ airPress.tricks = {
     names = { spin2 = "720", spin = "360", back = "Backwards jump", side = "Sideways jump", air = "Big air" },
     order = { "spin2", "spin", "back", "side", "air" },
     show = 2.5,        -- seconds a trick stays on the counter
+    challenges = { spin1 = true, spin2 = true, twist1 = true, whirl1 = true, back1 = true, side1 = true },
     circle = 0.9,      -- this much of a full turn counts as one
     travel = 2.5,      -- yards you must cover for back / side
     bigAir = 1.5,      -- seconds in the air for "air" (a flat jump is 0.82)
@@ -3657,10 +3667,14 @@ function airPress.TrickLand(air)
     st.bestSpinRow = math.max(st.bestSpinRow or 0, t.row)
     if not names then return end
     dirty = true
-    CheckChallenges()
+    for _, c in ipairs(CHALLENGES) do
+        if t.challenges[c.id] and not acct.done[c.id] and c.progress() >= c.goal then
+            CheckChallenges()
+            break
+        end
+    end
     t.text, t.at = names, GetTime()
     airPress.Line()
-    C_Timer.After(t.show + 0.05, airPress.Line)
 end
 
 function airPress.ComboEnd()
@@ -3681,10 +3695,6 @@ function airPress.Combo(now)
         airPress.comboBest = n >= airPress.comboSay or nil
     end
     airPress.Line()
-    C_Timer.After(airPress.comboGap + 0.05, function()
-        -- Still the last jump, so the combo is over.
-        if airPress.comboAt == now and airPress.combo > 0 then airPress.ComboEnd() end
-    end)
 end
 
 function airPress.Count(inWater, now)

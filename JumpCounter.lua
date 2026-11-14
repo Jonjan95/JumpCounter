@@ -5785,6 +5785,15 @@ events:SetScript("OnEvent", function(_, event, ...)
             acct.stats.bestDuel, acct.bestDuelFrom = nil, 1
             dirty = true
         end
+        -- 1.8.15: test builds before the release read the game's position
+        -- the wrong way round and counted forward jumps as backwards or
+        -- sideways. Those two counts start over once (only test builds
+        -- have them).
+        if (acct.tricksFrom or 0) < 1 then
+            if acct.stats.tricks then acct.stats.tricks.back, acct.stats.tricks.side = nil, nil end
+            acct.tricksFrom = 1
+            dirty = true
+        end
         JumpCounterDB.jumpTrace = nil      -- left over from a 1.8.5 test build
         hooksecurefunc("JumpOrAscendStart", OnJump)
         Print(("v%s loaded - type /jumps to open."):format(VERSION))

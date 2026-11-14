@@ -2801,6 +2801,7 @@ do
     local function EndDuel(d, text)
         local now = GetServerTime()
         duel = nil
+        acct.duelLive = nil
         acct.lastDuelEnd = now
         acct.duelPairs = acct.duelPairs or {}
         for a, t in pairs(acct.duelPairs) do
@@ -2813,11 +2814,14 @@ do
         end
     end
 
-    local function FinishDuel()
+    -- 1.8.14: leaving a duel loses it. forfeit = we left (logged out or
+    -- reloaded and came back after it was over). Without a final score from
+    -- them, they left: we win - if we jumped at all, otherwise no result.
+    local function FinishDuel(forfeit)
         local d = duel
         local opp = ClassColored(d.opp.name, d.opp.class)
-        if not d.heard then
-            -- Nothing ever arrived from them (disconnected?): no result.
+        local left = not forfeit and not d.oppFinal
+        if left and (d.mine or 0) == 0 then
             Print(("The jump duel against %s was cancelled - no score arrived from them."):format(opp))
             EndDuel(d, "Cancelled")
             -- No result: no pair cooldown, and only 5 minutes before the next.
@@ -2835,6 +2839,7 @@ do
             if data.acct == d.opp.acct and data.duelPoints then theirPoints = data.duelPoints end
         end
         local result = (me > them and 1) or (me < them and 0) or 0.5
+        if forfeit then result = 0 elseif left then result = 1 end
         -- 1.8.13: a tie goes to whoever got there first (if both said when).
         local first = ""
         if result == 0.5 and me > 0 and d.oppFinal and d.lastAt and d.oppAt and d.lastAt ~= d.oppAt then
@@ -2859,6 +2864,9 @@ do
             acct.lossStreak = 0
             xp = DUEL_WIN_XP
             text = ("You won the jump duel against %s, %d - %d%s! (+%d XP, %s)"):format(opp, me, them, first, xp, pts)
+            if left then
+                text = ("%s left the jump duel - you win! (+%d XP, %s)"):format(opp, xp, pts)
+            end
             short = "|cff33ff33You won!|r"
         elseif result == 0 then
             acct.duelLosses = (acct.duelLosses or 0) + 1
@@ -2870,6 +2878,11 @@ do
             end
             text = ("%s won the jump duel, %d - %d%s. (+%d XP for playing, %s)"):format(opp, them, me, first, xp, pts)
             short = "Good fight!"
+            if forfeit then
+                xp = 0
+                text = ("You left the jump duel against %s, so it counts as a loss. (%s)"):format(opp, pts)
+                short = "You left"
+            end
         else
             acct.duelDraws = (acct.duelDraws or 0) + 1
             acct.lossStreak = 0
@@ -2877,7 +2890,6 @@ do
             short = "Draw!"
         end
         text = text .. note
-        if not d.oppFinal then text = text .. " |cff999999(their last known score)|r" end
         acct.duelXP = (acct.duelXP or 0) + xp
         acct.duelPoints = myPoints + change
         dirty = true
@@ -2917,7 +2929,12 @@ do
                 d.sentCount, d.lastProgress = d.mine, GetTime()
                 SendDuelTo(d, "DP", d.id, acct.id, d.mine)
             end
-            if d.sentFinal and (d.oppFinal or now - d.doneAt >= 15) then FinishDuel() end
+            if d.sentFinal and (d.oppFinal or now - d.doneAt >= 15) then
+                FinishDuel()
+            elseif acct.duelLive then
+                local live = acct.duelLive
+                live.mine, live.theirs, live.lastAt, live.heard = d.mine, d.theirs, d.lastAt, d.heard
+            end
         end
         for id, r in pairs(duelResults) do
             if now - r.finish > 300 then duelResults[id] = nil end
@@ -2936,6 +2953,10 @@ do
 
     local function AnnounceDuelStart()
         local now = GetServerTime()
+        -- 1.8.15: the duel that's on is saved, so leaving can't wipe it (see
+        -- the end of CreateDuelFrame).
+        acct.duelLive = { id = duel.id, start = duel.start, finish = duel.finish, mine = duel.mine,
+            theirs = duel.theirs, opp = { acct = duel.opp.acct, name = duel.opp.name, class = duel.opp.class } }
         local length = duel.finish - duel.start
         local lengthText = length % 60 == 0
             and (length == 60 and "1 minute" or ("%d minutes"):format(length / 60))
@@ -3124,6 +3145,24 @@ do
         f.time:SetPoint("TOP", f.score, "BOTTOM", 0, -4)
         f:Hide()
         duelFrame = f
+
+        -- 1.8.15: a duel that was on when we logged out or reloaded. Back in
+        -- time: it carries on (our score so far is kept). Back after it's
+        -- over: we left it, and that's a loss.
+        local live = acct.duelLive
+        if type(live) ~= "table" or not live.id or type(live.opp) ~= "table" or not live.opp.acct then
+            acct.duelLive = nil
+            return
+        end
+        local now = GetServerTime()
+        duel = { id = live.id, start = live.start or now, finish = live.finish or now, state = "on",
+            opp = live.opp, mine = live.mine or 0, theirs = live.theirs or 0, lastAt = live.lastAt,
+            heard = live.heard }
+        if now < duel.finish then
+            StartDuelTicker()
+        else
+            FinishDuel(true)
+        end
     end
 
     -- Every minute, maybe start a random duel.
@@ -3565,7 +3604,9 @@ end
 -- around the minimap edge.
 ---------------------------------------------------------------------------
 local minimapButton
-local MINIMAP_ICON = GetMetadata(ADDON_NAME, "IconTexture") or "Interface\\Icons\\Ability_Rogue_Sprint"
+-- 1.8.15: our own icon, once the game has found it (see Media\Media4.lua).
+local MINIMAP_ICON = JumpCounter_Media4 and "Interface\\AddOns\\JumpCounter\\Media\\icon"
+    or "Interface\\Icons\\Ability_Rogue_Sprint"
 
 local function PlaceMinimapButton()
     local angle = math.rad(JumpCounterDB.ui.minimapAngle or 200)

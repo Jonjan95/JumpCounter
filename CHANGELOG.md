@@ -3,6 +3,11 @@
 All changes to Jumps, newest first. The addon updates itself through the CurseForge app;
 after an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [1.8.15] - Unreleased
+
+- **Leaving a duel now loses it.** Logging out when a duel starts used to cancel it. Now the player who stays wins, and the one who left gets the loss the next time they log in. A quick `/reload` in the middle of a duel is fine: back before the time is up, the duel carries on with your score so far.
+- **A new icon** for Jumps - on the minimap button and in the addon list. **Restart the game once** after this update to see it (until then you see the old one).
+
 ## [1.8.14] - 2026-11-13
 
 - **Combo:** keep jumping and your combo grows - every jump within 2 seconds of the last one adds to it. It shows on the on-screen counter while it's running and changes colour the longer it gets. Your longest combo is on the Overview tab, and a new best is announced to you in chat.

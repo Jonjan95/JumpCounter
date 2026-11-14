@@ -3555,10 +3555,14 @@ airPress.tricks = {
     bigAir = 1.5,      -- seconds in the air for "air" (a flat jump is 0.82)
     turned = 0,
 }
--- Where we are: north and west in yards (UnitPosition gives west first).
+-- Where we are: north and west in yards. UnitPosition gives north first,
+-- then west. (The first version read them the other way round: a plain
+-- forward jump then looked like a sideways or backwards one, depending on
+-- which way you faced. A debug log from the game showed jumps at full
+-- running speed read as "backwards", which the game doesn't allow.)
 function airPress.TrickWhere()
     if not UnitPosition then return end
-    local west, north = UnitPosition("player")
+    local north, west = UnitPosition("player")
     west, north = Plain(west), Plain(north)
     if type(west) == "number" and type(north) == "number" then return north, west end
 end

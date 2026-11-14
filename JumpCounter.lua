@@ -3379,7 +3379,10 @@ groundTracker:SetScript("OnUpdate", function()
     local wet = wasSwimming or Plain(IsSubmerged and IsSubmerged())
     -- 1.8.7: how long a jump on land kept you in the air (jump off something
     -- high). Landing dead doesn't count; flying or a flight path cancels it.
-    if airPress.jumpAt and falling then airPress.flew, airPress.seesAir = true, true end
+    if airPress.jumpAt and falling then
+        airPress.flew, airPress.seesAir = true, true
+        airPress.TrickTurn()
+    end
     if airPress.jumpAt and (grounded or wet) then
         local air = now - airPress.jumpAt
         if airPress.flew or wet then
@@ -3400,6 +3403,7 @@ groundTracker:SetScript("OnUpdate", function()
             airPress.jumpAt = nil
             -- Only a time we really saw: in the air on at least one frame.
             airPress.lastAir = airPress.flew and air or nil
+            if acct and airPress.flew and not wet then airPress.TrickLand(air) end
             if acct and airPress.flew and air > (acct.stats.bestAir or 0) and air < 120
                 and not (UnitIsDeadOrGhost and Plain(UnitIsDeadOrGhost("player"))) then
                 acct.stats.bestAir = air
@@ -3502,13 +3506,119 @@ end
 -- (stats.bestCombo); a new best of comboSay or more is said in chat when
 -- the combo ends.
 airPress.comboGap, airPress.comboShow, airPress.comboSay, airPress.combo = 2, 5, 25, 0
+-- The counter's bottom line: the running combo and, for a moment, the trick
+-- you just landed - or week / session when there's neither.
+function airPress.Line()
+    local f = counterFrame
+    if not (f and f.combo) then return end
+    local n, text = airPress.combo, nil
+    if n >= airPress.comboShow then
+        local color = n >= 250 and "ffff8000" or n >= 100 and "ffa335ee" or n >= 50 and "ff0070dd"
+            or n >= 25 and "ff1eff00" or "ffffffff"
+        text = ("|c%sCombo x%d|r"):format(color, n)
+    end
+    local t = airPress.tricks
+    if t.text and GetTime() - t.at < t.show then
+        text = (text and (text .. "  ") or "") .. "|cffffd100" .. t.text .. "!|r"
+    end
+    if text then
+        f.combo:SetText(text)
+        f.combo:Show()
+        f.session:Hide()
+    else
+        f.combo:Hide()
+        f.session:Show()
+    end
+end
+
+-- 1.8.15: tricks - what kind of jump it was, judged when you land:
+--   spin / spin2  you turned a full circle (or two) in the air
+--   back / side   you travelled backwards / sideways (and didn't spin)
+--   air           a long drop that you survived
+-- Turning comes from GetPlayerFacing and travel from UnitPosition; the game
+-- gives neither inside dungeons, raids and battlegrounds, so there only
+-- "air" can be landed. Each kind is counted in stats.tricks; the first time
+-- you land a kind it's said in chat, after that it only shows on the counter.
+airPress.tricks = {
+    names = { spin2 = "720", spin = "360", back = "Backwards jump", side = "Sideways jump", air = "Big air" },
+    order = { "spin2", "spin", "back", "side", "air" },
+    show = 2.5,        -- seconds a trick stays on the counter
+    circle = 0.9,      -- this much of a full turn counts as one
+    travel = 2.5,      -- yards you must cover for back / side
+    bigAir = 1.5,      -- seconds in the air for "air" (a flat jump is 0.82)
+    turned = 0,
+}
+-- Where we are: north and west in yards (UnitPosition gives west first).
+function airPress.TrickWhere()
+    if not UnitPosition then return end
+    local west, north = UnitPosition("player")
+    west, north = Plain(west), Plain(north)
+    if type(west) == "number" and type(north) == "number" then return north, west end
+end
+function airPress.TrickStart()
+    local t = airPress.tricks
+    local facing = GetPlayerFacing and Plain(GetPlayerFacing())
+    if type(facing) ~= "number" then facing = nil end
+    t.from, t.facing, t.turned = facing, facing, 0
+    t.north, t.west = airPress.TrickWhere()
+end
+function airPress.TrickTurn()
+    local t = airPress.tricks
+    if not t.facing then return end
+    local facing = GetPlayerFacing and Plain(GetPlayerFacing())
+    if type(facing) ~= "number" then return end
+    local d = facing - t.facing
+    if d > math.pi then d = d - 2 * math.pi elseif d < -math.pi then d = d + 2 * math.pi end
+    t.turned, t.facing = t.turned + d, facing
+end
+function airPress.TrickLand(air)
+    local t = airPress.tricks
+    if UnitIsDeadOrGhost and Plain(UnitIsDeadOrGhost("player")) then return end
+    local got = {}
+    local turned = math.abs(t.turned or 0)
+    local full = 2 * math.pi * t.circle
+    if turned >= 2 * full then got.spin2 = true elseif turned >= full then got.spin = true end
+    local along, dist
+    local north, west = airPress.TrickWhere()
+    if t.from and t.north and north and turned < math.pi / 2 then
+        local dn, dw = north - t.north, west - t.west
+        dist = math.sqrt(dn * dn + dw * dw)
+        if dist >= t.travel then
+            -- Facing 0 is north and grows towards the west.
+            along = (dn * math.cos(t.from) + dw * math.sin(t.from)) / dist
+            if along <= -0.75 then got.back = true elseif math.abs(along) <= 0.35 then got.side = true end
+        end
+    end
+    if air >= t.bigAir and air < 120 then got.air = true end
+    if debugMode then
+        Print(("debug: trick check - turned %d deg, travelled %s yd, along facing %s, %.2f s in the air"):format(
+            math.floor(math.deg(turned) + 0.5), dist and ("%.1f"):format(dist) or "?",
+            along and ("%.2f"):format(along) or "?", air))
+    end
+    t.from, t.north = nil, nil
+    local st = acct.stats
+    local names
+    for _, kind in ipairs(t.order) do
+        if got[kind] then
+            st.tricks = st.tricks or {}
+            st.tricks[kind] = (st.tricks[kind] or 0) + 1
+            names = (names and (names .. " + ") or "") .. t.names[kind]
+            if st.tricks[kind] == 1 then
+                Print(("New trick landed: |cffffffff%s|r!"):format(t.names[kind]))
+            end
+        end
+    end
+    if not names then return end
+    dirty = true
+    t.text, t.at = names, GetTime()
+    airPress.Line()
+    C_Timer.After(t.show + 0.05, airPress.Line)
+end
+
 function airPress.ComboEnd()
     local n = airPress.combo
     airPress.combo = 0
-    if counterFrame and counterFrame.combo then
-        counterFrame.combo:Hide()
-        counterFrame.session:Show()
-    end
+    airPress.Line()
     if airPress.comboBest then
         airPress.comboBest = nil
         Print(("New best combo: |cffffffff%d|r jumps in a row!"):format(n))
@@ -3522,14 +3632,7 @@ function airPress.Combo(now)
         acct.stats.bestCombo = n
         airPress.comboBest = n >= airPress.comboSay or nil
     end
-    local text = counterFrame and counterFrame.combo
-    if text and n >= airPress.comboShow then
-        local color = n >= 250 and "ffff8000" or n >= 100 and "ffa335ee" or n >= 50 and "ff0070dd"
-            or n >= 25 and "ff1eff00" or "ffffffff"
-        text:SetText(("|c%sCombo x%d|r"):format(color, n))
-        text:Show()
-        counterFrame.session:Hide()
-    end
+    airPress.Line()
     C_Timer.After(airPress.comboGap + 0.05, function()
         -- Still the last jump, so the combo is over.
         if airPress.comboAt == now and airPress.combo > 0 then airPress.ComboEnd() end
@@ -3559,6 +3662,7 @@ function airPress.Count(inWater, now)
     -- Timed until you land (1.8.7), for the rule above and the air time record.
     airPress.jumpAt, airPress.flew, airPress.lastAir = (not inWater) and now or nil, false, nil
     airPress.rejumpAt = nil
+    if not inWater then airPress.TrickStart() end
 
     charData.total = charData.total + 1
     sessionJumps = sessionJumps + 1
@@ -4057,7 +4161,27 @@ local function BuildOverviewTab(page, width)
             return air > 0 and ("%.1f s"):format(air) or GRAY:format("-") end,
           tip = "The longest a jump kept you in the air - and you survived the landing "
               .. "(counted since version 1.8.7)." },
+        { label = "Tricks landed", get = function()
+            local n = 0
+            for _, count in pairs(acct.stats.tricks or {}) do n = n + count end
+            return Fmt(n) end },
     })
+    -- The tricks you've found so far, and how many are still out there.
+    Tip(records[#records], function()
+        local t, found, lines = airPress.tricks, 0, {}
+        for _, kind in ipairs(t.order) do
+            local count = (acct.stats.tricks or {})[kind]
+            if count then
+                found = found + 1
+                table.insert(lines, ("%s: %s"):format(t.names[kind], Fmt(count)))
+            end
+        end
+        local left = #t.order - found
+        table.insert(lines, left > 0 and ("%d more to find - try jumping in different ways.\n"
+            .. "(Most tricks can't be seen inside dungeons, raids and battlegrounds.)"):format(left)
+            or "You've found them all.")
+        return "Tricks landed", table.concat(lines, "\n")
+    end)
 
     local hint = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("BOTTOMLEFT", 4, 4)

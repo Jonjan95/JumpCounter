@@ -55,6 +55,13 @@ local VERSION = GetMetadata(ADDON_NAME, "Version") or "0"
 
 local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Jumps|r: " .. msg)
+    -- 1.8.15: while /jumps debug is on, everything we print is also kept in
+    -- the saved variables (the last 1500 lines), so it can be read afterwards.
+    local db = JumpCounterDB
+    if db and db.debugLogging and db.debugLog then
+        table.insert(db.debugLog, ("%.2f %s"):format(GetTime(), tostring(msg)))
+        if #db.debugLog > 1500 then table.remove(db.debugLog, 1) end
+    end
 end
 
 -- In combat (boss fights especially) the game hides some values from addons
@@ -3591,9 +3598,10 @@ function airPress.TrickLand(air)
     end
     if air >= t.bigAir and air < 120 then got.air = true end
     if debugMode then
-        Print(("debug: trick check - turned %d deg, travelled %s yd, along facing %s, %.2f s in the air"):format(
+        Print(("debug: trick check - turned %d deg, travelled %s yd, along facing %s, %.2f s in the air%s%s"):format(
             math.floor(math.deg(turned) + 0.5), dist and ("%.1f"):format(dist) or "?",
-            along and ("%.2f"):format(along) or "?", air))
+            along and ("%.2f"):format(along) or "?", air,
+            t.from and "" or " (the game gave no facing)", (t.north and north) and "" or " (no position)"))
     end
     t.from, t.north = nil, nil
     local st = acct.stats
@@ -5569,7 +5577,12 @@ SlashCmdList.JUMPCOUNTER = function(input)
         Print("Leaderboard cleared; asking online players for fresh scores.")
     elseif cmd == "debug" then
         debugMode = not debugMode
-        Print("Debug " .. (debugMode and "on - every jump press prints its state." or "off."))
+        -- Turning it on starts a fresh saved log (see Print); it's written
+        -- to disk at the next /reload or logout.
+        if debugMode then JumpCounterDB.debugLog = {} end
+        JumpCounterDB.debugLogging = debugMode or nil
+        Print("Debug " .. (debugMode and "on - every jump press prints its state, and it's all saved until you turn it off."
+            or "off."))
         if debugMode then
             local nWhisper, nBNet = 0, 0
             for _ in pairs(knownWhisper) do nWhisper = nWhisper + 1 end
@@ -5794,6 +5807,7 @@ events:SetScript("OnEvent", function(_, event, ...)
             C_Timer.After(45, DropGroupStrangers)
         end
 
+        JumpCounterDB.debugLogging = nil       -- /jumps debug is off again after a /reload
         CreateDuelFrame()
         C_Timer.NewTicker(60, MaybeStartRandomDuel)
         C_Timer.NewTicker(5, CrownTick)

@@ -5,7 +5,8 @@ after an update, type `/reload` in game (or restart the game when the notes say 
 
 ## [1.8.15] - Unreleased
 
-- **Tricks:** there's more than one way to jump. Land a jump in a special way and the on-screen counter calls it out, next to your combo. There are a handful to find - the first time you land one it's said in chat, and the Overview tab keeps count. (Most can't be seen inside dungeons, raids and battlegrounds.)
+- **Special jumps:** the on-screen counter now notices when you land a jump in a special way and calls it out next to your combo. The Overview tab keeps count. (Most can't be seen inside dungeons, raids and battlegrounds.)
+- **8 new challenges** for combos and special jumps - there are now 108 to find.
 - **Leaving a duel now loses it.** Logging out when a duel starts used to cancel it. Now the player who stays wins, and the one who left gets the loss the next time they log in. A quick `/reload` in the middle of a duel is fine: back before the time is up, the duel carries on with your score so far.
 - **A new icon** for Jumps - on the minimap button and in the addon list. **Restart the game once** after this update to see it (until then you see the old one).
 

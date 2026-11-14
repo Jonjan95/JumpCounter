@@ -659,6 +659,28 @@ local CHALLENGES = {
       progress = function() return Stat("weeklyTiers") end },
     { id = "team2",    name = "Golden Month",      xp = 2000, goal = 4,
       desc = "Reach the gold weekly goal together 4 times.",  progress = function() return Stat("weeklyGold") end },
+
+    -- 1.8.15: the combo, and the kinds of jump we can tell apart (see
+    -- airPress.tricks): turning in the air, travelling backwards or sideways.
+    { id = "combo1",   name = "Keep It Going",     xp = 250,  goal = 100,
+      desc = "Reach a combo of 100.",                         progress = function() return Stat("bestCombo") end },
+    { id = "combo2",   name = "Can't Stop, Won't Stop", xp = 1000, goal = 500,
+      desc = "Reach a combo of 500.",                         progress = function() return Stat("bestCombo") end },
+    { id = "spin1",    name = "Dizzy",             xp = 150,  goal = 25,
+      desc = "Turn a full circle in the air 25 times.",
+      progress = function() local t = acct.stats.tricks or {} return (t.spin or 0) + (t.spin2 or 0) end },
+    { id = "spin2",    name = "Human Tornado",     xp = 1000, goal = 1000,
+      desc = "Turn a full circle in the air 1,000 times.",
+      progress = function() local t = acct.stats.tricks or {} return (t.spin or 0) + (t.spin2 or 0) end },
+    { id = "twist1",   name = "Double Trouble",    xp = 250,  goal = 25,
+      desc = "Turn two full circles in a single jump 25 times.",
+      progress = function() return (acct.stats.tricks or {}).spin2 or 0 end },
+    { id = "whirl1",   name = "Spin Cycle",        xp = 500,  goal = 10,
+      desc = "Turn a full circle in the air on 10 jumps in a row.", progress = function() return Stat("bestSpinRow") end },
+    { id = "back1",    name = "Moonwalker",        xp = 250,  goal = 100,
+      desc = "Jump backwards 100 times.",                     progress = function() return (acct.stats.tricks or {}).back or 0 end },
+    { id = "side1",    name = "Crab Walk",         xp = 250,  goal = 100,
+      desc = "Jump sideways 100 times.",                      progress = function() return (acct.stats.tricks or {}).side or 0 end },
 }
 
 local function CountCompleted(data)
@@ -3630,8 +3652,12 @@ function airPress.TrickLand(air)
             end
         end
     end
+    -- Spins on jumps in a row (a landing without one starts over).
+    t.row = (got.spin or got.spin2) and (t.row or 0) + 1 or 0
+    st.bestSpinRow = math.max(st.bestSpinRow or 0, t.row)
     if not names then return end
     dirty = true
+    CheckChallenges()
     t.text, t.at = names, GetTime()
     airPress.Line()
     C_Timer.After(t.show + 0.05, airPress.Line)
@@ -4832,6 +4858,8 @@ local function BuildChallengesTab(page, width)
         winrow = "Ability_Warrior_BattleShout", burst = "Ability_Hunter_RunningShot",
         pass = "Ability_Mount_JungleTiger", crowd = "INV_Misc_GroupNeedMore", level = "INV_Boots_05",
         duelplay = "INV_Sword_27", team = "Spell_Holy_PrayerOfFortitude",        -- 1.8.10
+        combo = "Spell_Nature_Lightning", spin = "Ability_Whirlwind", twist = "Spell_Nature_Cyclone",   -- 1.8.15
+        whirl = "Spell_Frost_WindWalkOn", back = "Ability_Rogue_Feint", side = "Ability_Hunter_Pet_Crab",
     }
     local ROW_H = 48
     local WEEK_H = 58                     -- the weekly goal's block at the top (1.8.10)

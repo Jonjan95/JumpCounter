@@ -2,7 +2,7 @@
 
 **Count every jump - and find out who in your guild really jumps the most.**
 
-Jumps turns your jumping in World of Warcraft into a game of its own: a leaderboard with your guild and friends, jump levels and prestige stars, 100 challenges, quick jump duels, an hourly crown race and a weekly goal you work on together.
+Jumps turns your jumping in World of Warcraft into a game of its own: a leaderboard with your guild and friends, jump levels and prestige stars, over 100 challenges, quick jump duels, an hourly crown race and a weekly goal you work on together.
 
 It works by itself from the moment you install it. Everyone in your guild or on your friends list who also has the addon shows up on your leaderboard automatically - no setup, no accounts. Every guild and group of friends gets its own leaderboard: a stranger you meet in a dungeon or battleground never ends up on yours.
 
@@ -13,7 +13,7 @@ It works by itself from the moment you install it. Everyone in your guild or on 
 - **A guild ranking:** the jumps of each guild on your leaderboard added up.
 - **Jump levels and prestige:** every jump is XP. Reach jump level 100 and you can prestige for a star - and the star changes look as you collect more.
 - **Jump ranks:** your all-time jumps earn you titles. Only your next one is shown; the rest are yours to discover.
-- **100 challenges** to find, from the obvious to the odd, plus **three daily challenges** that are the same for everyone - race your friends.
+- **Over 100 challenges** to find, from the obvious to the odd, plus **three daily challenges** that are the same for everyone - race your friends.
 - **A weekly goal for everyone together:** your whole leaderboard's jumps that week count towards three shared goals.
 - **Jump duels:** now and then you're paired with another player who is jumping around for a 30-second jump-off. Most jumps wins. Duels are rated, so there are duel ranks to climb. Can't wait? `/jumps duel`.
 - **The crown:** whoever jumps the most this hour holds it. A new race every hour.
